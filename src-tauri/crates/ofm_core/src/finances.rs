@@ -986,7 +986,7 @@ pub fn process_weekly_finances(game: &mut Game) {
             let home_count = home_match_counts.get(&team.id).copied().unwrap_or(0);
 
             if home_count > 0 {
-                let mut rng = rand::rng();
+                let mut rng = crate::rng::rng();
                 let attendance_pct = rng.random_range(60..=92) as f64 / 100.0;
                 let avg_ticket = rng.random_range(15..=25) as f64;
                 let total_revenue = calc_matchday(

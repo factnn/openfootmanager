@@ -80,7 +80,7 @@ pub fn qualifies_for_wonderkid(age: u32, potential: u8, ovr: u8) -> bool {
 /// Returns a value in [1, 99] that is always >= `ovr`.
 /// The lower bound of 1 (via `ovr.max(1)`) ensures potential is never 0 even when `ovr` is 0.
 pub fn generate_potential(ovr: u8, age: u32) -> u8 {
-    let mut rng = rand::rng();
+    let mut rng = crate::rng::rng();
     let bonus: u8 = match age {
         ..=18 => rng.random_range(15u8..=30),
         19..=20 => rng.random_range(8u8..=22),

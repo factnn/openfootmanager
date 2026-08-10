@@ -26,7 +26,7 @@ fn action(id: &str, label: &str, label_key: &str, action_type: ActionType) -> Me
 
 /// Message template system — generates rich messages with variations.
 pub fn welcome_message(team_name: &str, team_id: &str, date: &str) -> InboxMessage {
-    let mut rng = rand::rng();
+    let mut rng = crate::rng::rng();
     let idx = rng.random_range(0..3);
 
     InboxMessage::new(
@@ -66,7 +66,7 @@ pub fn welcome_message(team_name: &str, team_id: &str, date: &str) -> InboxMessa
 }
 
 pub fn season_schedule_message(league_name: &str, season_start: &str, date: &str) -> InboxMessage {
-    let mut rng = rand::rng();
+    let mut rng = crate::rng::rng();
     let idx = rng.random_range(0..2);
 
     InboxMessage::new(

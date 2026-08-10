@@ -554,7 +554,7 @@ mod tests {
         let config = WorldGenConfig::standard();
         for nation in &config.nations {
             let expected = config.clubs_per_division * nation.tiers;
-            let mut rng = rand::rng();
+            let mut rng = crate::rng::rng();
             let defs = generate_club_defs(
                 &WorldGenConfig {
                     clubs_per_division: config.clubs_per_division,
@@ -574,7 +574,7 @@ mod tests {
 
     #[test]
     fn club_names_are_unique_within_a_nation() {
-        let mut rng = rand::rng();
+        let mut rng = crate::rng::rng();
         let defs = generate_club_defs(&WorldGenConfig::standard(), &mut rng);
         for nation in WorldGenConfig::standard().nations {
             let names: Vec<&str> = defs
@@ -622,7 +622,7 @@ mod tests {
 
     #[test]
     fn short_codes_are_three_uppercase_letters() {
-        let mut rng = rand::rng();
+        let mut rng = crate::rng::rng();
         let defs = generate_club_defs(&WorldGenConfig::compact(), &mut rng);
         for def in &defs {
             assert_eq!(def.short_name.chars().count(), 3, "{}", def.name);
@@ -651,7 +651,7 @@ mod tests {
     #[test]
     fn brazilian_pyramid_uses_varied_local_names_and_unique_codes() {
         let brazil = *STANDARD_NATIONS.iter().find(|nation| nation.code == "BR").unwrap();
-        let mut rng = rand::rng();
+        let mut rng = crate::rng::rng();
         let defs = generate_club_defs(&WorldGenConfig {
             clubs_per_division: 20,
             nations: vec![brazil],

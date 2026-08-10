@@ -745,7 +745,7 @@ fn build_scout_report(
     team_name: Option<&str>,
     date: &str,
 ) -> InboxMessage {
-    let mut rng = rand::rng();
+    let mut rng = crate::rng::rng();
 
     // Accuracy: higher judging = less noise on reported attributes
     let noise_range = if judging_ability >= 80 {

@@ -66,7 +66,7 @@ pub(super) fn mood_report_message(
 }
 
 pub(super) fn board_confidence_message(msg_id: &str, date: &str) -> InboxMessage {
-    let mut rng = rand::rng();
+    let mut rng = crate::rng::rng();
     let idx = rng.random_range(0..2);
 
     InboxMessage::new(
@@ -112,7 +112,7 @@ pub(super) fn board_confidence_message(msg_id: &str, date: &str) -> InboxMessage
 }
 
 pub(super) fn fan_petition_message(msg_id: &str, team_name: &str, date: &str) -> InboxMessage {
-    let idx = rand::rng().random_range(0..3);
+    let idx = crate::rng::rng().random_range(0..3);
 
     InboxMessage::new(
         msg_id.to_string(),
@@ -163,7 +163,7 @@ pub(super) fn rival_interest_message(
     rival_name: &str,
     date: &str,
 ) -> InboxMessage {
-    let idx = rand::rng().random_range(0..2);
+    let idx = crate::rng::rng().random_range(0..2);
 
     InboxMessage::new(
         msg_id.to_string(),

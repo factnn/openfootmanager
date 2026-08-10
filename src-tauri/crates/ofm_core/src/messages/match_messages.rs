@@ -11,7 +11,7 @@ pub fn pre_match_message(
     match_date: &str,
     date: &str,
 ) -> InboxMessage {
-    let mut rng = rand::rng();
+    let mut rng = crate::rng::rng();
     let idx = rng.random_range(0..2);
     let venue_short = if is_home { "H" } else { "A" };
     let body_key = format!(
@@ -89,7 +89,7 @@ pub fn match_result_message(
         "Draw"
     };
 
-    let mut rng = rand::rng();
+    let mut rng = crate::rng::rng();
     let body_key = format!(
         "be.msg.matchResult.body.{}{}",
         outcome.to_lowercase(),

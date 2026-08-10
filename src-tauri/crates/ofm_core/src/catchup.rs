@@ -78,7 +78,7 @@ pub(crate) fn apply_simulated_result(
 /// new-game creation for leagues that started before the game's anchor date.
 pub fn simulate_past_fixtures(competition: &mut League, players: &[Player], cutoff: DateTime<Utc>) {
     let cutoff_date = cutoff.date_naive();
-    let mut rng = rand::rng();
+    let mut rng = crate::rng::rng();
 
     // Precompute strength once per participant to avoid O(fixtures × players).
     let strengths: std::collections::HashMap<String, f64> = competition

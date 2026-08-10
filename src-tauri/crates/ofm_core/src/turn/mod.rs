@@ -153,7 +153,7 @@ where
     // scoreline only, keeping the dormant world moving without the full engine.
     let dormant_competitions = dormant_competition_indices_due_today(game, &today);
     if !dormant_competitions.is_empty() {
-        let mut rng = rand::rng();
+        let mut rng = crate::rng::rng();
         for competition_index in dormant_competitions {
             dormant::simulate_dormant_competition_day(game, competition_index, &today, &mut rng);
         }
@@ -161,8 +161,8 @@ where
 
     // National-team football: window friendlies and any running World Cup.
     // Both self-filter by date, so they are no-ops on other days.
-    crate::national_team::process_national_team_fixtures_due(game, &today, &mut rand::rng());
-    crate::world_cup::process_world_cup_fixtures_due(game, &today, &mut rand::rng());
+    crate::national_team::process_national_team_fixtures_due(game, &today, &mut crate::rng::rng());
+    crate::world_cup::process_world_cup_fixtures_due(game, &today, &mut crate::rng::rng());
 
     crate::contracts::process_contract_expiries(game);
 
@@ -495,7 +495,8 @@ where
     let home_data = build_engine_team(game, &home_team_id);
     let away_data = build_engine_team(game, &away_team_id);
     let config = engine::MatchConfig::default();
-    let mut report = engine::simulate(&home_data, &away_data, &config);
+    let mut report =
+        engine::simulate_with_rng(&home_data, &away_data, &config, &mut crate::rng::rng());
     // A level knockout tie must produce a winner: resolve it with a simulated
     // shootout so the home side no longer advances by default on a draw.
     if is_knockout && report.home_goals == report.away_goals {
@@ -504,7 +505,7 @@ where
         let (home_pens, away_pens) = crate::national_team::simulate_shootout(
             home_strength,
             away_strength,
-            &mut rand::rng(),
+            &mut crate::rng::rng(),
         );
         report.home_penalties = Some(home_pens);
         report.away_penalties = Some(away_pens);
