@@ -350,6 +350,106 @@ mod tests {
 // Domain → Engine type conversion
 // ---------------------------------------------------------------------------
 
+/// The starting XI for a team: the saved `starting_xi_ids` when at least 8 of
+/// them are still valid, otherwise an automatic best-fit per formation slot.
+/// Slot-aligned (entry i plays formation slot i), mirroring the live-match team
+/// builder so a manager's lineup decisions affect the simulated match.
+fn select_starting_xi_ids(game: &Game, team_id: &str, formation: &str) -> Vec<String> {
+    use crate::player_rating::{effective_rating_for_assignment, formation_slots};
+    use std::collections::{HashMap, HashSet};
+    use std::cmp::Ordering;
+
+    let team = match game.teams.iter().find(|t| t.id == team_id) {
+        Some(t) => t,
+        None => return Vec::new(),
+    };
+    let saved_xi_ids = &team.starting_xi_ids;
+
+    let available: Vec<&domain::player::Player> = game
+        .players
+        .iter()
+        .filter(|p| p.team_id.as_deref() == Some(team_id) && p.injury.is_none())
+        .collect();
+    if available.is_empty() {
+        return Vec::new();
+    }
+    let players_by_id: HashMap<&str, &domain::player::Player> =
+        available.iter().map(|p| (p.id.as_str(), *p)).collect();
+
+    // Count distinct saved starters that are still available.
+    let mut seen = HashSet::new();
+    let valid_saved = saved_xi_ids
+        .iter()
+        .filter(|id| players_by_id.contains_key(id.as_str()) && seen.insert((*id).clone()))
+        .count();
+    if valid_saved < 8 {
+        return auto_starting_xi_ids(&available, formation);
+    }
+
+    let slots = formation_slots(formation);
+    let slot_count = slots.len().min(11);
+    let mut chosen: Vec<Option<&domain::player::Player>> = vec![None; slot_count];
+    let mut used: HashSet<String> = HashSet::new();
+    for (i, slot) in chosen.iter_mut().enumerate() {
+        if let Some(p) = saved_xi_ids
+            .get(i)
+            .and_then(|id| players_by_id.get(id.as_str()))
+            && used.insert(p.id.clone())
+        {
+            *slot = Some(*p);
+        }
+    }
+    for (i, slot) in chosen.iter_mut().enumerate() {
+        if slot.is_some() {
+            continue;
+        }
+        let best = available
+            .iter()
+            .copied()
+            .filter(|p| !used.contains(&p.id))
+            .max_by(|a, b| {
+                effective_rating_for_assignment(a, &slots[i])
+                    .partial_cmp(&effective_rating_for_assignment(b, &slots[i]))
+                    .unwrap_or(Ordering::Equal)
+            });
+        if let Some(p) = best {
+            used.insert(p.id.clone());
+            *slot = Some(p);
+        }
+    }
+    if chosen.iter().any(Option::is_none) {
+        return auto_starting_xi_ids(&available, formation);
+    }
+    chosen.into_iter().flatten().map(|p| p.id.clone()).collect()
+}
+
+/// Automatic slot-aligned best-fit XI (used when no valid saved XI exists).
+fn auto_starting_xi_ids<'a>(
+    available: &[&'a domain::player::Player],
+    formation: &str,
+) -> Vec<String> {
+    use crate::player_rating::{effective_rating_for_assignment, formation_slots};
+    use std::cmp::Ordering;
+    let slots = formation_slots(formation);
+    let mut pool: Vec<&domain::player::Player> = available.to_vec();
+    let mut xi = Vec::new();
+    for slot in slots.iter().take(11) {
+        let best = pool
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| {
+                effective_rating_for_assignment(a, slot)
+                    .partial_cmp(&effective_rating_for_assignment(b, slot))
+                    .unwrap_or(Ordering::Equal)
+            })
+            .map(|(i, _)| i);
+        if let Some(i) = best {
+            xi.push(pool.remove(i).id.clone());
+        }
+    }
+    xi
+}
+
 fn build_engine_team(game: &Game, team_id: &str) -> engine::TeamData {
     let team = game.teams.iter().find(|t| t.id == team_id);
     let player_roles = team.map(|t| &t.player_roles);
@@ -375,10 +475,12 @@ fn build_engine_team(game: &Game, team_id: &str) -> engine::TeamData {
         ),
     };
 
+    let xi_ids = select_starting_xi_ids(game, team_id, &formation);
     let players: Vec<engine::PlayerData> = game
         .players
         .iter()
         .filter(|p| p.team_id.as_deref() == Some(team_id))
+        .filter(|p| xi_ids.is_empty() || xi_ids.contains(&p.id))
         .map(|p| {
             let pos = match p.position.to_group_position() {
                 DomainPosition::Goalkeeper => engine::Position::Goalkeeper,
