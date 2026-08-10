@@ -1,0 +1,11 @@
+[package]
+name = "ofm-headless"
+version = "0.1.0"
+edition = "2021"
+description = "Headless season runner / ClubBench environment probe"
+
+[dependencies]
+domain = { path = "../domain" }
+ofm_core = { path = "../ofm_core" }
+chrono = "0.4"
+clap = { version = "4", features = ["derive"] }
