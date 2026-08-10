@@ -157,7 +157,7 @@ pub fn apply_event_response(
             "listen_fans" => {
                 // Small morale boost across squad
                 let user_team_id = game.manager.team_id.clone().unwrap_or_default();
-                let mut rng = rand::rng();
+                let mut rng = crate::rng::rng();
                 for p in game.players.iter_mut() {
                     if p.team_id.as_deref() == Some(&user_team_id) {
                         p.morale = (p.morale as i16 + rng.random_range(1..=3)).clamp(10, 100) as u8;
@@ -209,7 +209,7 @@ pub fn apply_event_response(
                 if let Some(pid) = &player_id
                     && let Some(p) = game.players.iter_mut().find(|p| p.id == *pid)
                 {
-                    let mut rng = rand::rng();
+                    let mut rng = crate::rng::rng();
                     p.morale = (p.morale as i16 + rng.random_range(3..=8)).clamp(10, 100) as u8;
                 }
                 if let Some(msg) = game.messages.iter_mut().find(|m| m.id == message_id) {
@@ -227,7 +227,7 @@ pub fn apply_event_response(
                 if let Some(pid) = &player_id
                     && let Some(p) = game.players.iter_mut().find(|p| p.id == *pid)
                 {
-                    let mut rng = rand::rng();
+                    let mut rng = crate::rng::rng();
                     p.morale = (p.morale as i16 - rng.random_range(3..=8)).clamp(10, 100) as u8;
                 }
                 if let Some(msg) = game.messages.iter_mut().find(|m| m.id == message_id) {

@@ -3,10 +3,9 @@
 //! What it proves:
 //!   1. a full season can be driven headlessly (no Tauri/GUI) via
 //!      `ofm_core::turn::process_day`;
-//!   2. the same seed produces the same *initial* world (world-gen determinism);
-//!   3. whether the *trajectory* is reproducible (it is expected NOT to be,
-//!      because the match engine / turn subsystems draw from ambient RNG —
-//!      see the note in `ofm_core/tests/scenario_tests.rs`).
+//!   2. with `ofm_core::rng::set_seed`, the same seed reproduces the same
+//!      initial world *and* the same season trajectory (content-level; entity
+//!      UUIDs still differ).
 //!
 //! Usage:
 //!   ofm-headless --seed 42 --days 400
@@ -26,7 +25,7 @@ use std::time::Instant;
 #[derive(Parser)]
 #[command(name = "ofm-headless", about = "Headless season runner / ClubBench environment probe")]
 struct Cli {
-    /// World seed — same seed ⇒ same initial world
+    /// Episode seed — same seed ⇒ same initial world + same trajectory
     #[arg(long, default_value_t = 42)]
     seed: u64,
     /// Number of game days to advance (default ≈ one full season: Jul → next summer)
@@ -90,28 +89,6 @@ fn content_fingerprint(game: &Game) -> String {
     )
 }
 
-/// Fingerprint of a raw generated world (before any game build steps), used to
-/// isolate whether non-determinism lives in *world generation* itself or in the
-/// *game build* glue (`repair_opening_youth_academies` etc.).
-fn world_content_fingerprint(world: &ofm_core::generator::WorldData) -> String {
-    let mut players: Vec<String> = world
-        .players
-        .iter()
-        .map(|p| format!("{:?}:{}", p.position, p.ovr))
-        .collect();
-    players.sort();
-    let mut teams: Vec<String> = world.teams.iter().map(|t| t.name.clone()).collect();
-    teams.sort();
-    format!(
-        "teams={} players={} staff={}\n{}\n{}",
-        world.teams.len(),
-        world.players.len(),
-        world.staff.len(),
-        teams.join("\n"),
-        players.join("\n")
-    )
-}
-
 fn print_standings(game: &Game, label: &str) {
     println!("== {label} == date {}", game.clock.current_date.format("%Y-%m-%d"));
     let Some(league) = &game.league else {
@@ -146,7 +123,10 @@ fn main() {
     let cli = Cli::parse();
     println!("== ofm-headless: seed={} days={} ==", cli.seed, cli.days);
 
+    // A single seeded stream drives build + season for run A.
+    ofm_core::rng::set_seed(cli.seed);
     let mut game_a = build_game(cli.seed);
+    let initial_a = content_fingerprint(&game_a);
     println!(
         "initial state: teams={}, players={}, staff={}",
         game_a.teams.len(),
@@ -164,21 +144,13 @@ fn main() {
     );
 
     if cli.check_determinism {
+        // Fresh identical stream for run B → should reproduce build + trajectory.
+        ofm_core::rng::set_seed(cli.seed);
         let mut game_b = build_game(cli.seed);
         println!("\n-- determinism check --");
-
-        // (a) Is the *raw generated world* reproducible from the seed?
-        let w1 = generate_world_data_seeded_with(cli.seed, &WorldGenConfig::compact(), None);
-        let w2 = generate_world_data_seeded_with(cli.seed, &WorldGenConfig::compact(), None);
         println!(
-            "raw world reproducible (same seed): {}",
-            world_content_fingerprint(&w1) == world_content_fingerprint(&w2)
-        );
-
-        // (b) Is the *built game* reproducible (world + game-build glue)?
-        println!(
-            "built game identical (content, ignoring ids): {}",
-            content_fingerprint(&game_a) == content_fingerprint(&game_b)
+            "initial identical (content, ignoring ids): {}",
+            initial_a == content_fingerprint(&game_b)
         );
 
         advance(&mut game_b, cli.days);
@@ -186,10 +158,11 @@ fn main() {
         let same_content = content_fingerprint(&game_a) == content_fingerprint(&game_b);
         println!("trajectory identical (content): {}", same_content);
         println!(
-            "=> findings: {}. ClubBench needs a deterministic RNG strategy (game-owned \
-             seeded RNG threaded through the engine/turn loop) for exact per-episode reset.",
-            if same_content { "world content is seed-reproducible AND season trajectory is reproducible" }
-            else { "initial world content is seed-reproducible, but the season trajectory diverges (ambient RNG)" }
+            "=> findings: {}. ClubBench can reset an episode with `rng::set_seed(scenario_seed)`.",
+            if same_content { "initial world AND season trajectory are seed-reproducible" }
+            else { "initial world is seed-reproducible, but the season trajectory diverges" }
         );
     }
+
+    ofm_core::rng::reset_random();
 }

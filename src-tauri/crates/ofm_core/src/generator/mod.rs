@@ -268,7 +268,7 @@ pub fn generate_youth_academy_recruit_with_nationality(
 ) -> Player {
     use domain::player::SquadRole;
 
-    let mut rng = rand::rng();
+    let mut rng = crate::rng::rng();
     let names_def = default_names_definition();
     let country_codes = sorted_country_codes(&names_def);
     let nationality = nationality_override
@@ -300,7 +300,7 @@ pub fn generate_national_team_player(
     squad_slot: usize,
     opening_year: u32,
 ) -> Player {
-    let mut rng = rand::rng();
+    let mut rng = crate::rng::rng();
     let names_def = default_names_definition();
     let nationality = generation::canonicalize_generated_nationality(nationality);
     // Avoid the youth-reserved slots so the player generates at a senior age.
@@ -362,7 +362,7 @@ fn create_staff_generator_context() -> (definitions::NamesDefinition, Vec<String
 }
 
 fn generate_missing_team_staff(world: &mut WorldData, opening_year: u32) -> bool {
-    let mut rng = rand::rng();
+    let mut rng = crate::rng::rng();
     let (names_def, country_codes) = create_staff_generator_context();
     let mut generated_staff = Vec::new();
     let roles = [
@@ -404,7 +404,7 @@ fn generate_missing_team_staff(world: &mut WorldData, opening_year: u32) -> bool
 }
 
 fn generate_standard_available_staff_for_teams(teams: &[Team], opening_year: u32) -> Vec<Staff> {
-    let mut rng = rand::rng();
+    let mut rng = crate::rng::rng();
     let (names_def, country_codes) = create_staff_generator_context();
     let fallback_seed = teams
         .first()
@@ -525,7 +525,7 @@ pub fn replenish_manager_and_scout_market(game: &mut crate::game::Game) {
     if unemployed_mgr_count < floor {
         let needed = floor - unemployed_mgr_count;
         let (names_def, country_codes) = create_staff_generator_context();
-        let mut rng = rand::rng();
+        let mut rng = crate::rng::rng();
         for _ in 0..needed {
             let nationality = if country_codes.is_empty() {
                 "ENG".to_string()
@@ -553,7 +553,7 @@ pub fn replenish_manager_and_scout_market(game: &mut crate::game::Game) {
     if unemployed_scout_count < floor {
         let needed = floor - unemployed_scout_count;
         let (names_def, country_codes) = create_staff_generator_context();
-        let mut rng = rand::rng();
+        let mut rng = crate::rng::rng();
         for _ in 0..needed {
             let nationality = if country_codes.is_empty() {
                 "ENG".to_string()
@@ -1028,7 +1028,7 @@ pub fn build_world_data_from_package(
         })
         .unwrap_or_else(default_opening_year)
         .clamp(MIN_OPENING_YEAR, MAX_OPENING_YEAR);
-    let mut rng = rand::rng();
+    let mut rng = crate::rng::rng();
     let names_def = {
         let mut merged = default_names_definition();
         if let Some(pkg_names) = &package.names {
@@ -1203,7 +1203,7 @@ pub fn generate_world_with(
     config: &clubs::WorldGenConfig,
     data_dir: Option<&std::path::Path>,
 ) -> (Vec<domain::team::Team>, Vec<Player>, Vec<Staff>) {
-    generate_world_with_rng(rand::rng(), config, data_dir)
+    generate_world_with_rng(crate::rng::rng(), config, data_dir)
 }
 
 /// Generate a world deterministically from `seed`. The same seed always
@@ -1860,7 +1860,7 @@ mod tests {
 
     #[test]
     fn test_pick_name_from_def() {
-        let mut rng = rand::rng();
+        let mut rng = crate::rng::rng();
         let names_def = default_names_definition();
         // Known nationality (ISO alpha-2)
         let (first, last) = pick_name_from_def("ES", &names_def, &mut rng);
@@ -1878,7 +1878,7 @@ mod tests {
 
     #[test]
     fn test_pick_nationality_weighted() {
-        let mut rng = rand::rng();
+        let mut rng = crate::rng::rng();
         let codes: Vec<String> = NATIONALITY_POOLS
             .iter()
             .map(|p| p.nationality.to_string())
@@ -1899,7 +1899,7 @@ mod tests {
 
     #[test]
     fn test_pick_nationality_defaults_generated_gb_to_eng() {
-        let mut rng = rand::rng();
+        let mut rng = crate::rng::rng();
         let codes = vec!["GB".to_string()];
 
         for _ in 0..100 {

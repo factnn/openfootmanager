@@ -808,7 +808,7 @@ fn manage_international_calendar(
     crate::national_team::schedule_national_team_friendlies(
         &mut game.national_teams,
         &window_dates,
-        &mut rand::rng(),
+        &mut crate::rng::rng(),
     );
 }
 

@@ -532,7 +532,7 @@ fn update_post_match_morale(
     away_team_id: &str,
 ) {
     use rand::RngExt;
-    let mut rng = rand::rng();
+    let mut rng = crate::rng::rng();
 
     let home_won = report.home_goals > report.away_goals;
     let away_won = report.away_goals > report.home_goals;
@@ -594,7 +594,7 @@ fn update_team_form(
     away_team_id: &str,
 ) {
     use rand::RngExt;
-    let mut rng = rand::rng();
+    let mut rng = crate::rng::rng();
 
     let home_result = if report.home_goals > report.away_goals {
         "W"
@@ -663,7 +663,7 @@ fn deplete_match_stamina(game: &mut Game, team_id: &str, report: &engine::MatchR
                 .unwrap_or(0);
             // Shared with national-team friendlies so call-ups wear players
             // identically to club fixtures.
-            crate::player_wear::apply_match_wear(player, minutes, &mut rand::rng());
+            crate::player_wear::apply_match_wear(player, minutes, &mut crate::rng::rng());
         }
     }
 }

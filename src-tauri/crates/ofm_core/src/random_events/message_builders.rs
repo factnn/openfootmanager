@@ -66,7 +66,7 @@ pub(super) fn training_injury_message(
     days: u32,
     date: &str,
 ) -> InboxMessage {
-    let idx = rand::rng().random_range(0..2);
+    let idx = crate::rng::rng().random_range(0..2);
 
     InboxMessage::new(
         msg_id.to_string(),
@@ -179,7 +179,7 @@ pub(super) fn international_callup_message(
 }
 
 pub(super) fn community_event_message(msg_id: &str, team_name: &str, date: &str) -> InboxMessage {
-    let idx = rand::rng().random_range(0..3);
+    let idx = crate::rng::rng().random_range(0..3);
 
     InboxMessage::new(
         msg_id.to_string(),

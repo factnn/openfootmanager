@@ -297,7 +297,7 @@ pub fn create_live_match(
 
     Ok(LiveMatchSession {
         match_state,
-        rng: StdRng::from_rng(&mut rand::rng()),
+        rng: StdRng::from_rng(&mut crate::rng::rng()),
         mode,
         fixture_index,
         competition_id: league.id.clone(),

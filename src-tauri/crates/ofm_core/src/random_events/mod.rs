@@ -88,7 +88,7 @@ pub fn check_random_events(game: &mut Game) {
     let existing_ids: std::collections::HashSet<String> =
         game.messages.iter().map(|m| m.id.clone()).collect();
 
-    let mut rng = rand::rng();
+    let mut rng = crate::rng::rng();
     let mut new_messages: Vec<InboxMessage> = Vec::new();
 
     // --- 1. Sponsor offer (1% chance per day) ---

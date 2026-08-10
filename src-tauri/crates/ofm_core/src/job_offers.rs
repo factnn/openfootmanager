@@ -248,7 +248,7 @@ fn appoint_manager(game: &mut Game, new_team_id: &str, date: &str) -> Result<Str
 /// managers from any club within the reputation gap, and to employed managers
 /// only from clubs that are a step up (per `is_better_club`).
 pub fn check_job_offers(game: &mut Game) {
-    let mut rng = rand::rng();
+    let mut rng = crate::rng::rng();
     let days = game.days_since_last_job_offer.unwrap_or(0);
 
     let threshold = if days == 0 {
@@ -462,7 +462,7 @@ pub fn apply_for_job(game: &mut Game, team_id: &str) -> JobApplicationResult {
         10
     };
 
-    let mut rng = rand::rng();
+    let mut rng = crate::rng::rng();
     let roll = rng.random_range(1..=100);
 
     let today = game.clock.current_date.format("%Y-%m-%d").to_string();
