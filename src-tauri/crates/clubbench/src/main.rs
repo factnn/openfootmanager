@@ -1,30 +1,49 @@
-//! ClubBench Gate 0: does the environment reward lineup decisions?
+//! ClubBench CLI.
 //!
-//! Runs the same season from several seeds under four baselines — greedy best
-//! XI, the AI default (noop), a random XI and a worst XI — and prints the
-//! user's final league position / points. If lineup matters, we expect
-//! `BestXI ≈ Noop ≥ Random ≫ Worst`.
+//! `gate0`    — the original lineup/tactics experiment (single-action baselines).
+//! `cadence`  — the decision-cadence experiment: the agent is consulted at every
+//!              matchday and transfer offer, producing a long decision trajectory.
 
 use clubbench::agents::{Agent, BestXIAgent, NoopAgent, RandomXIAgent, StyleProbe, WorstXIAgent};
-use clubbench::run::run_episode;
-use clap::Parser;
-use std::collections::BTreeMap;
+use clubbench::episode_agents::{AutoManager, OffersOnlyManager, PassiveManager, Policy};
+use clubbench::run::{run_episode, run_episode_cadence};
+use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "clubbench", about = "ClubBench Gate 0: lineup-effectiveness experiment")]
+#[command(name = "clubbench", about = "ClubBench environment experiments")]
 struct Cli {
-    /// Comma-separated episode seeds
-    #[arg(long, default_value = "42,43,44")]
-    seeds: String,
-    /// Game days per episode (default ≈ one full season)
-    #[arg(long, default_value_t = 400)]
-    days: u64,
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Original lineup/tactics experiment
+    Gate0 {
+        #[arg(long, default_value = "42,43,44")]
+        seeds: String,
+        #[arg(long, default_value_t = 400)]
+        days: u64,
+    },
+    /// Decision-cadence experiment (matchdays + transfer offers)
+    Cadence {
+        #[arg(long, default_value = "42,43,44")]
+        seeds: String,
+        #[arg(long, default_value_t = 400)]
+        days: u64,
+    },
 }
 
 fn main() {
     let cli = Cli::parse();
-    let seeds: Vec<u64> = cli
-        .seeds
+    match cli.command {
+        Commands::Gate0 { seeds, days } => gate0(&seeds, days),
+        Commands::Cadence { seeds, days } => cadence(&seeds, days),
+    }
+}
+
+fn gate0(seeds_str: &str, days: u64) {
+    let seeds: Vec<u64> = seeds_str
         .split(',')
         .filter_map(|s| s.trim().parse().ok())
         .collect();
@@ -39,26 +58,16 @@ fn main() {
         Box::new(WorstXIAgent),
     ];
 
-    println!("ClubBench Gate 0 — lineup effectiveness ({} days/episode)", cli.days);
-    println!("{:<10} {:>5} {:>4} {:>4} {:>4} {:>4} {:>5} {:>8}", "agent", "seed", "pos", "P", "W", "D", "pts", "GF:GA");
+    println!("ClubBench Gate 0 — lineup/tactics effectiveness ({} days/episode)", days);
+    println!("{:<18} {:>5} {:>4} {:>4} {:>4} {:>4} {:>5} {:>8}", "agent", "seed", "pos", "P", "W", "D", "pts", "GF:GA");
 
-    // agent name -> (sum_position, sum_points, n)
-    let mut agg: BTreeMap<String, (f64, f64, f64)> = BTreeMap::new();
-
+    let mut agg: std::collections::BTreeMap<String, (f64, f64, f64)> = std::collections::BTreeMap::new();
     for seed in &seeds {
         for agent in &agents {
-            let r = run_episode(*seed, cli.days, agent.as_ref());
+            let r = run_episode(*seed, days, agent.as_ref());
             println!(
-                "{:<10} {:>5} {:>4} {:>4} {:>4} {:>4} {:>5} {:>3}:{:<3}",
-                agent.name(),
-                seed,
-                r.position,
-                r.played,
-                r.won,
-                r.drawn,
-                r.points,
-                r.goals_for,
-                r.goals_against
+                "{:<18} {:>5} {:>4} {:>4} {:>4} {:>4} {:>5} {:>3}:{:<3}",
+                agent.name(), seed, r.position, r.played, r.won, r.drawn, r.points, r.goals_for, r.goals_against
             );
             let e = agg.entry(agent.name().to_string()).or_insert((0.0, 0.0, 0.0));
             e.0 += r.position as f64;
@@ -67,9 +76,50 @@ fn main() {
         }
         println!();
     }
-
     println!("=== averages over {} seeds ===", seeds.len());
     for (name, (pos, pts, n)) in &agg {
-        println!("{:<10} avg_pos {:5.2}   avg_pts {:5.2}", name, pos / n, pts / n);
+        println!("{:<18} avg_pos {:5.2}   avg_pts {:5.2}", name, pos / n, pts / n);
+    }
+}
+
+fn cadence(seeds_str: &str, days: u64) {
+    let seeds: Vec<u64> = seeds_str
+        .split(',')
+        .filter_map(|s| s.trim().parse().ok())
+        .collect();
+    let mut policies: Vec<Box<dyn Policy>> = vec![
+        Box::new(AutoManager::new(domain::team::PlayStyle::Attacking)),
+        Box::new(OffersOnlyManager),
+        Box::new(PassiveManager),
+    ];
+
+    println!("ClubBench Cadence — long decision trajectory ({} days/episode)", days);
+    println!(
+        "{:<14} {:>5} {:>6} {:>4} {:>4} {:>4} {:>4} {:>5} {:>8}",
+        "policy", "seed", "steps", "pos", "P", "W", "D", "pts", "GF:GA"
+    );
+
+    let mut agg: std::collections::BTreeMap<String, (f64, f64, f64, f64)> = std::collections::BTreeMap::new();
+    for seed in &seeds {
+        for policy in policies.iter_mut() {
+            let r = run_episode_cadence(*seed, days, policy.as_mut());
+            println!(
+                "{:<14} {:>5} {:>6} {:>4} {:>4} {:>4} {:>4} {:>5} {:>3}:{:<3}",
+                policy.name(), seed, r.steps, r.position, r.played, r.won, r.drawn, r.points, r.goals_for, r.goals_against
+            );
+            let e = agg.entry(policy.name().to_string()).or_insert((0.0, 0.0, 0.0, 0.0));
+            e.0 += r.steps as f64;
+            e.1 += r.position as f64;
+            e.2 += r.points as f64;
+            e.3 += 1.0;
+        }
+        println!();
+    }
+    println!("=== averages over {} seeds ===", seeds.len());
+    for (name, (steps, pos, pts, n)) in &agg {
+        println!(
+            "{:<14} avg_steps {:7.1}   avg_pos {:5.2}   avg_pts {:5.2}",
+            name, steps / n, pos / n, pts / n
+        );
     }
 }
