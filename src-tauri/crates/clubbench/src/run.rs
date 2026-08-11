@@ -54,7 +54,7 @@ pub fn metrics_of(game: &Game) -> ClubMetrics {
     let wage_bill: u64 = players.iter().map(|p| p.wage as u64).sum();
     let squad_value: u64 = players.iter().map(|p| p.market_value).sum();
     let today = game.clock.current_date.format("%Y-%m-%d").to_string();
-    let mut ages: Vec<f64> = players
+    let ages: Vec<f64> = players
         .iter()
         .filter_map(|p| {
             let b = chrono::NaiveDate::parse_from_str(&p.date_of_birth, "%Y-%m-%d").ok()?;
