@@ -13,15 +13,26 @@
 //!      leaderboard stays interpretable ("took 46 points, spent £2M less than
 //!      the reference manager").
 
-use crate::env::{ClubPick, ScenarioBudget, WorldSize};
+use crate::env::{AgentMode, ClubPick, ScenarioBudget, WorldSize};
 use crate::episode_agents::{AutoManager, Policy};
-use crate::run::{run_episode_cadence_for_world, CadenceResult, ClubMetrics};
+use crate::run::{run_episode_cadence_with_mode, CadenceResult, ClubMetrics};
 use domain::team::PlayStyle;
 
 /// The frozen reference policy: ClubBench-Heuristic-v1. Code is fixed and
 /// public; the leaderboard is anchored on this, never on the current SOTA.
 pub fn reference_v1() -> AutoManager {
     AutoManager::new(PlayStyle::Attacking)
+}
+
+/// The mode-appropriate reference: the Manager track anchors on AutoManager
+/// (handles the market), the Coach track on a pure best-XI + tactics coach.
+pub fn reference_for(mode: AgentMode) -> Box<dyn crate::episode_agents::Policy> {
+    match mode {
+        AgentMode::Manager => Box::new(reference_v1()),
+        AgentMode::Coach => Box::new(crate::episode_agents::CoachBestXI {
+            play_style: PlayStyle::Attacking,
+        }),
+    }
 }
 
 /// A named evaluation dimension with its direction.
@@ -173,13 +184,26 @@ pub fn collect_paired_for_world(
     horizon_days: u64,
     candidate: &mut dyn Policy,
 ) -> (Vec<PairedSample>, Vec<DimReport>) {
-    let mut reference = reference_v1();
+    collect_paired_for_mode(pick, world, budget, AgentMode::Manager, seeds, horizon_days, candidate)
+}
+
+/// As [`collect_paired_for_world`], with an explicit agent mode.
+pub fn collect_paired_for_mode(
+    pick: &ClubPick,
+    world: WorldSize,
+    budget: &ScenarioBudget,
+    mode: AgentMode,
+    seeds: &[u64],
+    horizon_days: u64,
+    candidate: &mut dyn Policy,
+) -> (Vec<PairedSample>, Vec<DimReport>) {
+    let mut reference = reference_for(mode);
     // per dimension -> Vec<PairedSample>
     let mut per_dim: Vec<Vec<PairedSample>> = DIMENSIONS.iter().map(|_| Vec::new()).collect();
 
     for &seed in seeds {
-        let ref_res: CadenceResult = run_episode_cadence_for_world(seed, pick, world, budget, horizon_days, &mut reference);
-        let cand_res: CadenceResult = run_episode_cadence_for_world(seed, pick, world, budget, horizon_days, candidate);
+        let ref_res: CadenceResult = run_episode_cadence_with_mode(seed, pick, world, budget, mode, horizon_days, reference.as_mut());
+        let cand_res: CadenceResult = run_episode_cadence_with_mode(seed, pick, world, budget, mode, horizon_days, candidate);
         for (i, dim) in DIMENSIONS.iter().enumerate() {
             per_dim[i].push(PairedSample {
                 seed,

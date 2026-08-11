@@ -120,6 +120,7 @@ pub struct EpisodeObservation {
 pub struct Episode {
     pub game: Game,
     pub step: u64,
+    pub mode: env::AgentMode,
     horizon_days: u64,
     advanced_days: u64,
     /// Offer ids already shown to the agent — new offers (never-seen ids) are
@@ -140,7 +141,7 @@ impl Episode {
     }
 
     /// Start a reproducible episode with an explicit world size and scenario
-    /// budget.
+    /// budget (Manager track).
     pub fn new_with_pick_and_world(
         seed: u64,
         pick: &env::ClubPick,
@@ -148,11 +149,25 @@ impl Episode {
         budget: &env::ScenarioBudget,
         horizon_days: u64,
     ) -> Self {
+        Self::new_with_mode(seed, pick, world, budget, env::AgentMode::Manager, horizon_days)
+    }
+
+    /// Start a reproducible episode with an explicit world size, budget and
+    /// agent mode (Coach = transfers frozen, Manager = full market).
+    pub fn new_with_mode(
+        seed: u64,
+        pick: &env::ClubPick,
+        world: env::WorldSize,
+        budget: &env::ScenarioBudget,
+        mode: env::AgentMode,
+        horizon_days: u64,
+    ) -> Self {
         ofm_core::rng::set_seed(seed);
         let game = env::build_game_for_club_with(seed, pick, world, budget);
         Self {
             game,
             step: 0,
+            mode,
             horizon_days,
             advanced_days: 0,
             seen_offers: Default::default(),
@@ -249,10 +264,10 @@ impl Episode {
             is_matchday,
             next_fixture,
             squad: self.squad_view(user_team_id),
-            offers,
-            market: self.market_view(user_team_id),
-            scout_reports: self.scout_report_views(),
-            scouting_in_progress: self.scouting_views(),
+            offers: if self.mode == env::AgentMode::Manager { offers } else { Vec::new() },
+            market: if self.mode == env::AgentMode::Manager { self.market_view(user_team_id) } else { Vec::new() },
+            scout_reports: if self.mode == env::AgentMode::Manager { self.scout_report_views() } else { Vec::new() },
+            scouting_in_progress: if self.mode == env::AgentMode::Manager { self.scouting_views() } else { Vec::new() },
             transfer_window_open: transfers::transfer_window_is_open(&self.game),
             done: self.advanced_days >= self.horizon_days,
         }
@@ -343,10 +358,10 @@ impl Episode {
             if self.user_matchday() {
                 break; // user matchday — lineup/tactics decision
             }
-            if !self.fresh_offers().is_empty() {
+            if self.mode == env::AgentMode::Manager && !self.fresh_offers().is_empty() {
                 break; // fresh transfer offer — accept/reject/counter decision
             }
-            if self.market_day() {
+            if self.mode == env::AgentMode::Manager && self.market_day() {
                 break; // transfer-window market — scout/bid decision
             }
             self.advance_one_day();
