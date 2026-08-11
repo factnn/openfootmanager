@@ -27,6 +27,8 @@ pub enum Action {
     SetLineup { player_ids: Vec<String> },
     /// Set the play style for the upcoming matchday.
     SetTactics { play_style: domain::team::PlayStyle },
+    /// Set lineup AND play style in one action (match preparation).
+    SetMatchPlan { player_ids: Vec<String>, play_style: domain::team::PlayStyle },
     /// Accept an incoming transfer offer for one of our players.
     AcceptOffer { player_id: String, offer_id: String },
     /// Reject an incoming transfer offer.
@@ -207,6 +209,10 @@ impl Episode {
             Action::Continue => {}
             Action::SetLineup { player_ids } => env::apply_lineup(&mut self.game, &player_ids),
             Action::SetTactics { play_style } => env::apply_play_style(&mut self.game, play_style),
+            Action::SetMatchPlan { player_ids, play_style } => {
+                env::apply_lineup(&mut self.game, &player_ids);
+                env::apply_play_style(&mut self.game, play_style);
+            }
             Action::AcceptOffer { player_id, offer_id } => {
                 let _ = transfers::respond_to_offer(&mut self.game, &player_id, &offer_id, true);
             }
