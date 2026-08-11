@@ -801,7 +801,7 @@ fn upsert_loan_offer(
     offer_id
 }
 
-pub(crate) fn transfer_window_is_open(game: &Game) -> bool {
+pub fn transfer_window_is_open(game: &Game) -> bool {
     matches!(
         game.season_context.transfer_window.status,
         TransferWindowStatus::Open | TransferWindowStatus::DeadlineDay

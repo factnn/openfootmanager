@@ -114,6 +114,17 @@ pub fn build_game_for_club(seed: u64, pick: &ClubPick) -> Game {
         start,
     ));
     ofm_core::season_context::refresh_game_context(&mut game);
+    // Scenario budget: the compact world's generated clubs have unrealistically
+    // small budgets (~£600k) that make the transfer market unusable. A scenario
+    // defines the club's financial starting state — here a "big-budget rebuild"
+    // club. (Per-scenario budgets become a first-class env parameter next.)
+    if let Some(tid) = game.manager.team_id.clone() {
+        if let Some(team) = game.teams.iter_mut().find(|t| t.id == tid) {
+            team.finance = 60_000_000;
+            team.transfer_budget = 50_000_000;
+            team.wage_budget = 3_000_000;
+        }
+    }
     game
 }
 

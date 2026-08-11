@@ -35,8 +35,10 @@ pub enum Action {
     RejectOffer { player_id: String, offer_id: String },
     /// Counter an incoming offer with our own requested fee.
     CounterOffer { player_id: String, offer_id: String, fee: u64 },
-    /// Bid for a transfer-listed player.
+    /// Bid for a player.
     MakeBid { player_id: String, fee: u64 },
+    /// Send a scout to report on a player (reveals fuzzed rating + potential band).
+    Scout { player_id: String },
 }
 
 /// An incoming transfer offer for one of our players (status `Pending`).
@@ -51,16 +53,44 @@ pub struct OfferView {
     pub suggested_counter: Option<u64>,
 }
 
-/// A transfer-listed player we could bid on.
+/// A player available on the market we could bid on. True attributes are NOT
+/// shown (partial observability); only a scout report reveals a fuzzed rating
+/// and a coarse potential band.
 #[derive(Serialize, Clone, Debug)]
 pub struct MarketView {
     pub player_id: String,
     pub player_name: String,
     pub position: Position,
-    pub ovr: u8,
     pub age: u8,
     pub market_value: u64,
     pub team: String,
+    /// Fuzzed overall rating if a scout report exists, else None.
+    pub reported_ovr: Option<u8>,
+    /// Coarse potential band ("worldClass"/"strong"/"moderate"/"unclear") if scouted.
+    pub potential: Option<String>,
+    /// A scout is currently watching this player.
+    pub scouting: bool,
+}
+
+/// A completed scout report (from the game's message inbox).
+#[derive(Serialize, Clone, Debug)]
+pub struct ScoutReportView {
+    pub player_id: String,
+    pub player_name: String,
+    pub team: String,
+    /// Fuzzed overall rating (1-99).
+    pub avg_rating: Option<u32>,
+    pub rating_desc: String,
+    pub potential: String,
+    pub confidence: String,
+}
+
+/// A scouting assignment in progress.
+#[derive(Serialize, Clone, Debug)]
+pub struct ScoutingView {
+    pub player_id: String,
+    pub player_name: String,
+    pub days_remaining: u32,
 }
 
 /// The full decision-point observation.
@@ -78,6 +108,9 @@ pub struct EpisodeObservation {
     pub squad: Vec<env::PlayerView>,
     pub offers: Vec<OfferView>,
     pub market: Vec<MarketView>,
+    pub scout_reports: Vec<ScoutReportView>,
+    pub scouting_in_progress: Vec<ScoutingView>,
+    pub transfer_window_open: bool,
     pub done: bool,
 }
 
@@ -87,6 +120,9 @@ pub struct Episode {
     pub step: u64,
     horizon_days: u64,
     advanced_days: u64,
+    /// Offer ids already shown to the agent — new offers (never-seen ids) are
+    /// the only offer decision points, so `Continue` doesn't re-stop forever.
+    seen_offers: std::collections::HashSet<String>,
 }
 
 impl Episode {
@@ -105,6 +141,7 @@ impl Episode {
             step: 0,
             horizon_days,
             advanced_days: 0,
+            seen_offers: Default::default(),
         }
     }
 
@@ -112,10 +149,17 @@ impl Episode {
         self.step
     }
 
-    pub fn observe(&self) -> EpisodeObservation {
+    pub fn observe(&mut self) -> EpisodeObservation {
         let user_team_id = self.game.manager.team_id.as_deref().unwrap_or_default();
         let team = self.game.teams.iter().find(|t| t.id == user_team_id);
         let today = self.game.clock.current_date.format("%Y-%m-%d").to_string();
+
+        // Mark the offers we're about to show as seen, so `Continue` doesn't
+        // make the env re-stop on the same offers forever.
+        let offers = self.pending_offers();
+        for o in &offers {
+            self.seen_offers.insert(o.offer_id.clone());
+        }
 
         let is_matchday = self.user_fixture_index().is_some();
         let next_fixture = self
@@ -191,8 +235,11 @@ impl Episode {
             is_matchday,
             next_fixture,
             squad: self.squad_view(user_team_id),
-            offers: self.pending_offers(),
+            offers,
             market: self.market_view(user_team_id),
+            scout_reports: self.scout_report_views(),
+            scouting_in_progress: self.scouting_views(),
+            transfer_window_open: transfers::transfer_window_is_open(&self.game),
             done: self.advanced_days >= self.horizon_days,
         }
     }
@@ -200,12 +247,10 @@ impl Episode {
     /// Apply one action and advance to the next decision point.
     pub fn step(&mut self, action: Action) -> EpisodeObservation {
         self.step += 1;
-        // A `Continue` at an offer decision point means "don't act on these
-        // offers": advance past them (they will expire over time) instead of
-        // re-stopping at the same offers forever.
-        let skip_offers = matches!(action, Action::Continue);
         self.apply(action);
-        self.advance_to_next_decision(skip_offers);
+        // Every action addresses the current decision point, so the world
+        // always moves forward at least one day (which plays any match today).
+        self.advance_to_next_decision();
         self.observe()
     }
 
@@ -230,32 +275,58 @@ impl Episode {
             Action::MakeBid { player_id, fee } => {
                 let _ = transfers::make_transfer_bid(&mut self.game, &player_id, fee);
             }
+            Action::Scout { player_id } => {
+                if let Some(scout_id) = self.user_scout_id() {
+                    let _ = ofm_core::scouting::send_scout(&mut self.game, &scout_id, &player_id);
+                }
+            }
+            Action::AcceptOffer { player_id, offer_id } => {
+                let _ = transfers::respond_to_offer(&mut self.game, &player_id, &offer_id, true);
+            }
         }
     }
 
-    /// Advance day by day, playing matches, until the next decision point
-    /// (a user matchday, a pending offer, or the horizon). When `skip_offers`
-    /// is set (the agent chose `Continue`), the currently pending offers are
-    /// advanced past rather than re-stopped at; stale offers expire over time.
-    fn advance_to_next_decision(&mut self, skip_offers: bool) {
-        let mut first = true;
-        while self.advanced_days < self.horizon_days {
-            if self.user_fixture_index().is_some() {
-                // Today is a matchday: the agent's action (lineup/tactics) is in.
-                // process_day plays it (the engine is XI-aware), then we continue.
-                ofm_core::turn::process_day(&mut self.game);
-                self.advanced_days += 1;
-                first = false;
-                continue;
-            }
-            if !(skip_offers && first) && !self.pending_offers().is_empty() {
-                // Decision point: pending transfer offers.
+    /// Move the world forward one day (expiring stale offers, running the turn
+    /// loop, and playing any user matchday via the XI-aware engine).
+    fn advance_one_day(&mut self) {
+        transfers::expire_stale_transfer_offers(&mut self.game);
+        ofm_core::turn::process_day(&mut self.game);
+        self.advanced_days += 1;
+    }
+
+    /// A transfer-window "market day": the agent gets a chance to scout and bid
+    /// roughly every three days while the window is open.
+    fn market_day(&self) -> bool {
+        transfers::transfer_window_is_open(&self.game) && self.advanced_days % 3 == 0
+    }
+
+    /// Pending offers the agent has never been shown (never-seen ids).
+    fn fresh_offers(&self) -> Vec<OfferView> {
+        self.pending_offers()
+            .into_iter()
+            .filter(|o| !self.seen_offers.contains(&o.offer_id))
+            .collect()
+    }
+
+    /// Advance until the next decision point (a user matchday, fresh pending
+    /// offers, a transfer-window market day, or the horizon), always moving
+    /// forward at least one day first.
+    fn advance_to_next_decision(&mut self) {
+        self.advance_one_day();
+        loop {
+            if self.advanced_days >= self.horizon_days {
                 break;
             }
-            first = false;
-            transfers::expire_stale_transfer_offers(&mut self.game);
-            ofm_core::turn::process_day(&mut self.game);
-            self.advanced_days += 1;
+            if self.user_fixture_index().is_some() {
+                break; // user matchday — lineup/tactics decision
+            }
+            if !self.fresh_offers().is_empty() {
+                break; // fresh transfer offer — accept/reject/counter decision
+            }
+            if self.market_day() {
+                break; // transfer-window market — scout/bid decision
+            }
+            self.advance_one_day();
         }
     }
 
@@ -315,34 +386,114 @@ impl Episode {
     }
 
     fn market_view(&self, own_team_id: &str) -> Vec<MarketView> {
+        // Scout reports keyed by player id, for the market view.
+        let reports: std::collections::HashMap<&str, &domain::message::ScoutReportData> = self
+            .game
+            .messages
+            .iter()
+            .filter_map(|m| m.context.scout_report.as_ref())
+            .map(|r| (r.player_id.as_str(), r))
+            .collect();
+        let scouting: std::collections::HashSet<&str> = self
+            .game
+            .scouting_assignments
+            .iter()
+            .map(|a| a.player_id.as_str())
+            .collect();
+
+        // Market = a scouted shortlist of targets outside the squad: the most
+        // valuable players in the world (transfer-listed or not). Ratings are
+        // hidden until scouted (partial observability).
         let mut out: Vec<MarketView> = self
             .game
             .players
             .iter()
-            .filter(|p| {
-                p.transfer_listed
-                    && p.team_id.as_deref() != Some(own_team_id)
-                    && p.injury.is_none()
-            })
-            .map(|p| MarketView {
-                player_id: p.id.clone(),
-                player_name: p.match_name.clone(),
-                position: p.position.clone(),
-                ovr: p.ovr,
-                age: age_from_dob(&p.date_of_birth, &self.game.clock.current_date.format("%Y-%m-%d").to_string()),
-                market_value: p.market_value,
-                team: self
-                    .game
-                    .teams
-                    .iter()
-                    .find(|t| Some(&t.id) == p.team_id.as_ref())
-                    .map(|t| t.name.clone())
-                    .unwrap_or_default(),
+            .filter(|p| p.team_id.as_deref() != Some(own_team_id) && p.injury.is_none())
+            .map(|p| {
+                let report = reports.get(p.id.as_str());
+                MarketView {
+                    player_id: p.id.clone(),
+                    player_name: p.match_name.clone(),
+                    position: p.position.clone(),
+                    age: age_from_dob(&p.date_of_birth, &self.game.clock.current_date.format("%Y-%m-%d").to_string()),
+                    market_value: p.market_value,
+                    team: self
+                        .game
+                        .teams
+                        .iter()
+                        .find(|t| Some(&t.id) == p.team_id.as_ref())
+                        .map(|t| t.name.clone())
+                        .unwrap_or_default(),
+                    reported_ovr: report.and_then(|r| r.avg_rating).map(|v| v as u8),
+                    potential: report.map(|r| r.potential_key.clone()),
+                    scouting: scouting.contains(p.id.as_str()),
+                }
             })
             .collect();
-        out.sort_by(|a, b| b.ovr.cmp(&a.ovr));
+        // The market shortlist = the most valuable targets outside the squad,
+        // so unscouted high-value players remain visible and scoutable.
+        out.sort_by(|a, b| b.market_value.cmp(&a.market_value));
         out.truncate(30);
         out
+    }
+
+    /// Completed scout reports pulled from the game's message inbox.
+    fn scout_report_views(&self) -> Vec<ScoutReportView> {
+        self.game
+            .messages
+            .iter()
+            .filter_map(|m| m.context.scout_report.as_ref())
+            .map(|r| {
+                let team = r
+                    .team_name
+                    .clone()
+                    .or_else(|| {
+                        self.game.players.iter().find(|p| p.id == r.player_id)
+                            .and_then(|p| p.team_id.as_ref())
+                            .and_then(|tid| self.game.teams.iter().find(|t| &t.id == tid))
+                            .map(|t| t.name.clone())
+                    })
+                    .unwrap_or_default();
+                ScoutReportView {
+                    player_id: r.player_id.clone(),
+                    player_name: r.player_name.clone(),
+                    team,
+                    avg_rating: r.avg_rating,
+                    rating_desc: r.rating_key.clone(),
+                    potential: r.potential_key.clone(),
+                    confidence: r.confidence_key.clone(),
+                }
+            })
+            .collect()
+    }
+
+    /// Scouting assignments in progress.
+    fn scouting_views(&self) -> Vec<ScoutingView> {
+        self.game
+            .scouting_assignments
+            .iter()
+            .map(|a| ScoutingView {
+                player_id: a.player_id.clone(),
+                player_name: self
+                    .game
+                    .players
+                    .iter()
+                    .find(|p| p.id == a.player_id)
+                    .map(|p| p.match_name.clone())
+                    .unwrap_or_default(),
+                days_remaining: a.days_remaining,
+            })
+            .collect()
+    }
+
+    /// The user's first scout (needed by `send_scout`).
+    fn user_scout_id(&self) -> Option<String> {
+        let user_team_id = self.game.manager.team_id.as_deref()?;
+        self.game
+            .staff
+            .iter()
+            .find(|s| s.team_id.as_deref() == Some(user_team_id) && s.role == domain::staff::StaffRole::Scout)
+            .map(|s| s.id.clone())
     }
 }
 
