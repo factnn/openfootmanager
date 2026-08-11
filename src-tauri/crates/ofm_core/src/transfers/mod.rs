@@ -581,7 +581,7 @@ fn loan_offer_is_stale(current_date: NaiveDate, offer: &domain::player::LoanOffe
     (current_date - offer_date).num_days() >= TRANSFER_NEGOTIATION_STALE_DAYS
 }
 
-fn expire_stale_transfer_offers(game: &mut Game) {
+pub fn expire_stale_transfer_offers(game: &mut Game) {
     let current_date = game.clock.current_date.date_naive();
 
     for player in &mut game.players {

@@ -2,6 +2,8 @@
 
 use crate::agents::Agent;
 use crate::env;
+use crate::episode::Episode;
+use crate::episode_agents::Policy;
 use ofm_core::game::Game;
 
 #[derive(Debug, Clone)]
@@ -64,5 +66,52 @@ fn result_of(game: &Game, seed: u64) -> EpisodeResult {
         points: e.map(|e| e.points).unwrap_or(0),
         goals_for: e.map(|e| e.goals_for).unwrap_or(0),
         goals_against: e.map(|e| e.goals_against).unwrap_or(0),
+    }
+}
+
+/// Result of a decision-cadence episode.
+#[derive(Debug, Clone)]
+pub struct CadenceResult {
+    pub seed: u64,
+    pub steps: u64,
+    pub position: usize,
+    pub played: u32,
+    pub won: u32,
+    pub drawn: u32,
+    pub lost: u32,
+    pub points: u32,
+    pub goals_for: u32,
+    pub goals_against: u32,
+}
+
+/// Run the decision-cadence episode with a policy. The agent is consulted at
+/// every decision point (matchdays + transfer offers); `steps` is the number of
+/// decisions made over the horizon.
+pub fn run_episode_cadence(
+    seed: u64,
+    horizon_days: u64,
+    policy: &mut dyn Policy,
+) -> CadenceResult {
+    let mut ep = Episode::new(seed, horizon_days);
+    let mut obs = ep.observe();
+    let mut guard = 0u64;
+    while !obs.done && guard < 200_000 {
+        let action = policy.act(&obs);
+        obs = ep.step(action);
+        guard += 1;
+    }
+
+    let r = result_of(&ep.game, seed);
+    CadenceResult {
+        seed,
+        steps: ep.step_count(),
+        position: r.position,
+        played: r.played,
+        won: r.won,
+        drawn: r.drawn,
+        lost: r.lost,
+        points: r.points,
+        goals_for: r.goals_for,
+        goals_against: r.goals_against,
     }
 }
