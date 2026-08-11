@@ -14,9 +14,6 @@ edition = "2021"
 name = "openfootmanager_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
-[workspace]
-members = ["crates/ofm_core", "crates/db", "crates/domain", "crates/engine", "crates/sim-bench", "crates/ofm-cli", "crates/ofm-headless", "crates/clubbench"]
-
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -51,16 +48,6 @@ csv = "1"
 
 [dev-dependencies]
 tempfile = "3"
-
-# Dev builds (`tauri dev`) otherwise run the whole simulation unoptimized, which
-# is the dominant cause of the in-app sluggishness. Lightly optimizing our own
-# crates and fully optimizing dependencies keeps incremental compiles fast while
-# making the played dev build an order of magnitude quicker at runtime.
-[profile.dev]
-opt-level = 1
-
-[profile.dev.package."*"]
-opt-level = 3
 
 [features]
 mcp = ["dep:rmcp", "dep:axum", "dep:tower", "dep:tokio", "dep:tokio-util"]
