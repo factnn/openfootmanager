@@ -159,7 +159,18 @@ pub fn run_episode_cadence_for(
     horizon_days: u64,
     policy: &mut dyn Policy,
 ) -> CadenceResult {
-    let mut ep = Episode::new_with_pick(seed, pick, horizon_days);
+    run_episode_cadence_for_world(seed, pick, env::WorldSize::Medium, horizon_days, policy)
+}
+
+/// As [`run_episode_cadence_for`], with an explicit world size.
+pub fn run_episode_cadence_for_world(
+    seed: u64,
+    pick: &env::ClubPick,
+    world: env::WorldSize,
+    horizon_days: u64,
+    policy: &mut dyn Policy,
+) -> CadenceResult {
+    let mut ep = Episode::new_with_pick_and_world(seed, pick, world, horizon_days);
     let mut obs = ep.observe();
     let mut guard = 0u64;
     while !obs.done && guard < 200_000 {

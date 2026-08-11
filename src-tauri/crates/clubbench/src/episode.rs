@@ -134,8 +134,18 @@ impl Episode {
 
     /// Start a reproducible episode managing the club selected by `pick`.
     pub fn new_with_pick(seed: u64, pick: &env::ClubPick, horizon_days: u64) -> Self {
+        Self::new_with_pick_and_world(seed, pick, env::WorldSize::Medium, horizon_days)
+    }
+
+    /// Start a reproducible episode with an explicit world size.
+    pub fn new_with_pick_and_world(
+        seed: u64,
+        pick: &env::ClubPick,
+        world: env::WorldSize,
+        horizon_days: u64,
+    ) -> Self {
         ofm_core::rng::set_seed(seed);
-        let game = env::build_game_for_club(seed, pick);
+        let game = env::build_game_for_club_with(seed, pick, world);
         Self {
             game,
             step: 0,
@@ -161,12 +171,12 @@ impl Episode {
             self.seen_offers.insert(o.offer_id.clone());
         }
 
-        let is_matchday = self.user_fixture_index().is_some();
+        let is_matchday = self.user_matchday();
         let next_fixture = self
             .game
-            .league
-            .as_ref()
-            .and_then(|league| {
+            .competitions
+            .iter()
+            .find_map(|league| {
                 league
                     .fixtures
                     .iter()
@@ -314,7 +324,7 @@ impl Episode {
             if self.advanced_days >= self.horizon_days {
                 break;
             }
-            if self.user_fixture_index().is_some() {
+            if self.user_matchday() {
                 break; // user matchday — lineup/tactics decision
             }
             if !self.fresh_offers().is_empty() {
@@ -327,8 +337,10 @@ impl Episode {
         }
     }
 
-    fn user_fixture_index(&self) -> Option<usize> {
-        env::user_fixture_index(&self.game)
+    /// Does the user's club have a scheduled match today (any competition)?
+    fn user_matchday(&self) -> bool {
+        let today = self.game.clock.current_date.format("%Y-%m-%d").to_string();
+        self.game.user_has_scheduled_match_on(&today)
     }
 
     fn squad_view(&self, team_id: &str) -> Vec<env::PlayerView> {
