@@ -23,10 +23,14 @@ pub struct ClubMetrics {
     pub squad_value: u64,
     pub avg_age: f64,
     pub squad_size: usize,
+    /// Value created over the episode: (squad value + balance) change.
+    pub net_value: i64,
+    /// Net transfer outlay (buying − selling income); positive = spent money.
+    pub net_spend: i64,
 }
 
 /// Extract the metrics for the user's club from a finished game state.
-pub fn metrics_of(game: &Game) -> ClubMetrics {
+pub fn metrics_of(game: &Game, initial_net_worth: i64, net_spend: i64) -> ClubMetrics {
     let user_team_id = game.manager.team_id.as_deref().unwrap_or_default();
     let mut st = game
         .league
@@ -74,6 +78,8 @@ pub fn metrics_of(game: &Game) -> ClubMetrics {
         squad_value,
         avg_age,
         squad_size: players.len(),
+        net_value: env::net_worth(game) - initial_net_worth,
+        net_spend,
     }
 }
 
@@ -94,6 +100,7 @@ pub struct EpisodeResult {
 pub fn run_episode(seed: u64, days: u64, agent: &dyn Agent) -> EpisodeResult {
     ofm_core::rng::set_seed(seed);
     let mut game = env::build_game(seed);
+    let initial_net_worth = env::net_worth(&game);
 
     for _ in 0..days {
         if env::user_fixture_index(&game).is_some() {
@@ -105,11 +112,11 @@ pub fn run_episode(seed: u64, days: u64, agent: &dyn Agent) -> EpisodeResult {
     }
 
     ofm_core::rng::reset_random();
-    result_of(&game, seed)
+    result_of(&game, seed, initial_net_worth, 0)
 }
 
-fn result_of(game: &Game, seed: u64) -> EpisodeResult {
-    let m = metrics_of(game);
+fn result_of(game: &Game, seed: u64, initial_net_worth: i64, net_spend: i64) -> EpisodeResult {
+    let m = metrics_of(game, initial_net_worth, net_spend);
     let tid = game.manager.team_id.as_deref().unwrap_or_default();
     let e = game
         .league
@@ -193,7 +200,7 @@ pub fn run_episode_cadence_with_mode(
         guard += 1;
     }
 
-    let r = result_of(&ep.game, seed);
+    let r = result_of(&ep.game, seed, ep.initial_net_worth, ep.net_spend);
     CadenceResult {
         seed,
         steps: ep.step_count(),

@@ -313,6 +313,24 @@ pub fn build_game(seed: u64) -> Game {
     game
 }
 
+/// The club's total net worth: squad market value + bank balance.
+pub fn net_worth(game: &Game) -> i64 {
+    let team_id = game.manager.team_id.as_deref().unwrap_or_default();
+    let balance = game
+        .teams
+        .iter()
+        .find(|t| t.id == team_id)
+        .map(|t| t.finance)
+        .unwrap_or(0);
+    let squad_value: i64 = game
+        .players
+        .iter()
+        .filter(|p| p.team_id.as_deref() == Some(team_id))
+        .map(|p| p.market_value as i64)
+        .sum();
+    balance + squad_value
+}
+
 /// The agent's information set at the current date.
 pub fn observe(game: &Game) -> Observation {
     let user_team_id = game.manager.team_id.as_deref().unwrap_or_default();
