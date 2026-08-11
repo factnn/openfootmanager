@@ -57,6 +57,25 @@ enum Commands {
         #[arg(long, default_value = "rebuild")]
         scenario: String,
     },
+    /// Run the full benchmark suite (scenario grid × all baselines) — one command
+    Run {
+        #[arg(long, default_value = "42,43")]
+        seeds: String,
+        #[arg(long, default_value_t = 300)]
+        days: u64,
+        /// World size: medium (default) | standard | compact
+        #[arg(long, default_value = "medium")]
+        world: String,
+        /// Managed-club strength ranks (comma-separated); 0 = weakest
+        #[arg(long, default_value = "0")]
+        clubs: String,
+        /// Scenario budgets (comma-separated): crisis,moneyball,rebuild,title
+        #[arg(long, default_value = "crisis,rebuild")]
+        scenarios: String,
+        /// Track: manager (transfers+scouting+finance) | coach (lineup/tactics only)
+        #[arg(long, default_value = "manager")]
+        mode: String,
+    },
 }
 
 fn main() {
@@ -65,6 +84,115 @@ fn main() {
         Commands::Gate0 { seeds, days } => gate0(&seeds, days),
         Commands::Cadence { seeds, days, world, scenario } => cadence(&seeds, days, &world, &scenario),
         Commands::Score { seeds, days, club, world, scenario } => score_cmd(&seeds, days, club, &world, &scenario),
+        Commands::Run { seeds, days, world, clubs, scenarios, mode } => {
+            run_benchmark(&seeds, days, &world, &clubs, &scenarios, &mode)
+        }
+    }
+}
+
+/// Run the full benchmark: for every (club, scenario) cell, score every
+/// baseline candidate vs the frozen reference, and print a consolidated
+/// leaderboard (per-cell Z table + overall mean Z per dimension).
+fn run_benchmark(
+    seeds_str: &str,
+    days: u64,
+    world_str: &str,
+    clubs_str: &str,
+    scenarios_str: &str,
+    mode_str: &str,
+) {
+    use clubbench::env::{AgentMode, ClubPick, ScenarioBudget};
+    use clubbench::score::{collect_paired_for_mode, DimReport};
+    use std::collections::BTreeMap;
+
+    let mode = match mode_str.trim().to_lowercase().as_str() {
+        "coach" => AgentMode::Coach,
+        _ => AgentMode::Manager,
+    };
+    let seeds: Vec<u64> = seeds_str.split(',').filter_map(|s| s.trim().parse().ok()).collect();
+    let world = world_size(world_str);
+    let clubs: Vec<usize> = clubs_str.split(',').filter_map(|s| s.trim().parse().ok()).collect();
+    let scenarios: Vec<&str> = scenarios_str.split(',').map(str::trim).collect();
+
+    println!(
+        "ClubBench Benchmark — mode={:?}, world={:?}, {} seeds, clubs={:?}, scenarios={:?}",
+        mode,
+        world,
+        seeds.len(),
+        clubs,
+        scenarios
+    );
+    println!(
+        "reference = {}",
+        if mode == AgentMode::Coach { "CoachBestXI (frozen, Attacking)" } else { "ClubBench-Heuristic-v1 (frozen AutoManager, Attacking)" }
+    );
+    if seeds.len() < 8 {
+        println!("note: Z is noisy with <8 seeds (reference σ is estimated from few samples); use 8+ seeds for stable leaderboards.\n");
+    } else {
+        println!();
+    }
+
+    let dims = ["points", "balance", "wage_bill", "squad_value", "avg_age", "squad_size"];
+    let mut candidates: Vec<Box<dyn Policy>> = if mode == AgentMode::Coach {
+        vec![
+            Box::new(clubbench::episode_agents::CoachBestXI { play_style: domain::team::PlayStyle::Attacking }),
+            Box::new(clubbench::episode_agents::CoachBestXI { play_style: domain::team::PlayStyle::Balanced }),
+            Box::new(clubbench::episode_agents::CoachBestXI { play_style: domain::team::PlayStyle::Defensive }),
+            Box::new(clubbench::episode_agents::CoachRandom),
+            Box::new(clubbench::episode_agents::CoachWorst),
+        ]
+    } else {
+        vec![
+            Box::new(ProactiveManager::new(domain::team::PlayStyle::Attacking)),
+            Box::new(SellingManager::new(domain::team::PlayStyle::Attacking)),
+            Box::new(AutoManager::new(domain::team::PlayStyle::Balanced)),
+            Box::new(OffersOnlyManager),
+            Box::new(PassiveManager),
+        ]
+    };
+
+    // overall: candidate -> dim -> sum of Z (for the mean)
+    let mut overall: BTreeMap<String, Vec<f64>> = BTreeMap::new();
+    let mut cells = 0usize;
+
+    for scenario in &scenarios {
+        let budget = ScenarioBudget::by_name(scenario);
+        for &club in &clubs {
+            let pick = ClubPick::Strength(club);
+            println!("=== scenario={}  club-rank={} ===", scenario, club);
+
+            // Reference raw baseline (difficulty anchor) from the first candidate's report.
+            let (_, ref_reports) = collect_paired_for_mode(&pick, world, &budget, mode, &seeds, days, candidates[0].as_mut());
+            let refpts = ref_reports[0].reference_mean;
+            println!(
+                "  reference raw: pts={:.1}  balance={:.0}  squad_value={:.0}  squad_size={:.1}",
+                refpts, ref_reports[1].reference_mean, ref_reports[3].reference_mean, ref_reports[5].reference_mean
+            );
+
+            println!("  {:<12} {}", "candidate", dims.iter().map(|d| format!("{:>9}", format!("{}(Z)", d))).collect::<Vec<_>>().join(" "));
+            for candidate in candidates.iter_mut() {
+                let (_, reports) = collect_paired_for_mode(&pick, world, &budget, mode, &seeds, days, candidate.as_mut());
+                let zs: Vec<f64> = reports.iter().map(|r: &DimReport| r.z).collect();
+                println!(
+                    "  {:<12} {}",
+                    candidate.name(),
+                    zs.iter().map(|z| format!("{:>9.2}", z)).collect::<Vec<_>>().join(" ")
+                );
+                let e = overall.entry(candidate.name().to_string()).or_insert_with(|| vec![0.0; dims.len()]);
+                for (i, z) in zs.iter().enumerate() {
+                    e[i] += z;
+                }
+            }
+            cells += 1;
+            println!();
+        }
+    }
+
+    println!("=== overall: mean Z across {} cells ===", cells);
+    println!("{:<12} {}", "candidate", dims.iter().map(|d| format!("{:>9}", format!("{}(Z)", d))).collect::<Vec<_>>().join(" "));
+    for (name, sums) in &overall {
+        let means: Vec<f64> = sums.iter().map(|s| s / cells as f64).collect();
+        println!("{:<12} {}", name, means.iter().map(|m| format!("{:>9.2}", m)).collect::<Vec<_>>().join(" "));
     }
 }
 

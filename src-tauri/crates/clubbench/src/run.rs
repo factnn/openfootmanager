@@ -171,7 +171,20 @@ pub fn run_episode_cadence_for_world(
     horizon_days: u64,
     policy: &mut dyn Policy,
 ) -> CadenceResult {
-    let mut ep = Episode::new_with_pick_and_world(seed, pick, world, budget, horizon_days);
+    run_episode_cadence_with_mode(seed, pick, world, budget, env::AgentMode::Manager, horizon_days, policy)
+}
+
+/// As [`run_episode_cadence_for_world`], with an explicit agent mode.
+pub fn run_episode_cadence_with_mode(
+    seed: u64,
+    pick: &env::ClubPick,
+    world: env::WorldSize,
+    budget: &env::ScenarioBudget,
+    mode: env::AgentMode,
+    horizon_days: u64,
+    policy: &mut dyn Policy,
+) -> CadenceResult {
+    let mut ep = Episode::new_with_mode(seed, pick, world, budget, mode, horizon_days);
     let mut obs = ep.observe();
     let mut guard = 0u64;
     while !obs.done && guard < 200_000 {

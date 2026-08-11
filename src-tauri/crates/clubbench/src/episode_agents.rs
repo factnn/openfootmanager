@@ -197,6 +197,121 @@ impl Policy for ProactiveManager {
     }
 }
 
+/// Greedy slot-aligned best-XI from the observation (condition-aware).
+pub fn best_lineup_xi(obs: &EpisodeObservation) -> Vec<String> {
+    let slots = ofm_core::player_rating::formation_slots(&obs.formation);
+    let mut pool: Vec<&crate::env::PlayerView> = obs.squad.iter().filter(|p| !p.injured).collect();
+    let mut xi = Vec::new();
+    for slot in slots.iter().take(11) {
+        let group = slot.to_group_position();
+        let mut best = None;
+        let mut best_rating: f64 = f64::MIN;
+        for (i, p) in pool.iter().enumerate() {
+            let rating = if p.group_position == group { p.ovr as f64 } else { p.ovr as f64 - 8.0 };
+            let rating = if p.condition < 55 { rating - 25.0 } else { rating };
+            if rating > best_rating {
+                best_rating = rating;
+                best = Some(i);
+            }
+        }
+        if let Some(i) = best {
+            xi.push(pool.remove(i).id.clone());
+        }
+    }
+    xi
+}
+
+// ---------------------------------------------------------------------------
+// Coach-track policies: transfers/scouting frozen — matchday decisions only.
+// ---------------------------------------------------------------------------
+
+/// Pick the strongest XI + a fixed play style on every matchday; ignore the
+/// market entirely (the Coach track).
+pub struct CoachBestXI {
+    pub play_style: PlayStyle,
+}
+impl Policy for CoachBestXI {
+    fn name(&self) -> &str {
+        "CoachBestXI"
+    }
+    fn act(&mut self, obs: &EpisodeObservation) -> Action {
+        if obs.is_matchday {
+            return Action::SetMatchPlan {
+                player_ids: best_lineup_xi(obs),
+                play_style: self.play_style.clone(),
+            };
+        }
+        Action::Continue
+    }
+}
+
+/// A uniformly random valid XI on matchdays.
+pub struct CoachRandom;
+impl Policy for CoachRandom {
+    fn name(&self) -> &str {
+        "CoachRandom"
+    }
+    fn act(&mut self, obs: &EpisodeObservation) -> Action {
+        use rand::seq::SliceRandom;
+        if obs.is_matchday {
+            let slots = ofm_core::player_rating::formation_slots(&obs.formation);
+            let mut pool: Vec<&crate::env::PlayerView> = obs.squad.iter().filter(|p| !p.injured).collect();
+            pool.shuffle(&mut ofm_core::rng::rng());
+            let mut xi = Vec::new();
+            for slot in slots.iter().take(11) {
+                let group = slot.to_group_position();
+                let pos = pool
+                    .iter()
+                    .position(|p| p.group_position == group)
+                    .or_else(|| pool.iter().position(|_| true));
+                if let Some(i) = pos {
+                    xi.push(pool.remove(i).id.clone());
+                }
+            }
+            return Action::SetMatchPlan {
+                player_ids: xi,
+                play_style: PlayStyle::Balanced,
+            };
+        }
+        Action::Continue
+    }
+}
+
+/// The *worst* XI every matchday (antagonist lower bound).
+pub struct CoachWorst;
+impl Policy for CoachWorst {
+    fn name(&self) -> &str {
+        "CoachWorst"
+    }
+    fn act(&mut self, obs: &EpisodeObservation) -> Action {
+        if obs.is_matchday {
+            let slots = ofm_core::player_rating::formation_slots(&obs.formation);
+            let mut pool: Vec<&crate::env::PlayerView> = obs.squad.iter().filter(|p| !p.injured).collect();
+            let mut xi = Vec::new();
+            for slot in slots.iter().take(11) {
+                let group = slot.to_group_position();
+                let mut worst = None;
+                let mut worst_rating: f64 = f64::MAX;
+                for (i, p) in pool.iter().enumerate() {
+                    let rating = if p.group_position == group { p.ovr as f64 } else { p.ovr as f64 - 8.0 };
+                    if rating < worst_rating {
+                        worst_rating = rating;
+                        worst = Some(i);
+                    }
+                }
+                if let Some(i) = worst {
+                    xi.push(pool.remove(i).id.clone());
+                }
+            }
+            return Action::SetMatchPlan {
+                player_ids: xi,
+                play_style: PlayStyle::Defensive,
+            };
+        }
+        Action::Continue
+    }
+}
+
 /// A manager that actively sells: transfer-lists the oldest backup players to
 /// attract offers, then accepts anything at/above 1.3× market value. Exercises
 /// the ListPlayer / AcceptOffer / RejectOffer actions (the selling side).

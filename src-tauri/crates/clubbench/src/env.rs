@@ -137,6 +137,15 @@ pub enum WorldSize {
     Standard,
 }
 
+/// Which track the episode exercises. `Coach` restricts the agent to matchday
+/// decisions (lineup/tactics) — transfers/scouting are frozen, so the env only
+/// stops at matchdays and hides the market. `Manager` unlocks the full market.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum AgentMode {
+    Coach,
+    Manager,
+}
+
 /// The managed club's financial starting state — a scenario lever. The
 /// generated worlds' budgets scale with reputation and are unrealistically
 /// small, so each scenario defines the club's finances explicitly.
