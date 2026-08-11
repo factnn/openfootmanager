@@ -42,14 +42,58 @@ pub struct Observation {
     pub squad: Vec<PlayerView>,
 }
 
-/// Build a fully playable game for the user (first team of a seeded compact
-/// world). Mirrors `ofm_core/tests/scenario_tests.rs::make_scenario_game`.
-pub fn build_game(seed: u64) -> Game {
+/// How the managed club is chosen from the generated world.
+#[derive(Debug, Clone)]
+pub enum ClubPick {
+    /// `world.teams[idx]` (world-order, deterministic per seed).
+    Index(usize),
+    /// The club whose average squad strength ranks `rank`-th when all clubs
+    /// are sorted by mean player ovr (0 = weakest, len-1 = strongest).
+    Strength(usize),
+}
+
+/// Build a fully playable game for the user team chosen by `pick` from a
+/// seeded compact world. Mirrors `ofm_core/tests/scenario_tests.rs`.
+pub fn build_game_for_club(seed: u64, pick: &ClubPick) -> Game {
     let world = generate_world_data_seeded_with(seed, &WorldGenConfig::compact(), None);
     let start = Utc.with_ymd_and_hms(2026, 7, 1, 0, 0, 0).unwrap();
     let clock = GameClock::new(start);
 
-    let first_team = world.teams.first().expect("generated world has at least one team");
+    // Average squad strength per team, for Strength-based picks.
+    let team_ovr: std::collections::HashMap<String, f64> = {
+        let mut sums: std::collections::HashMap<String, (f64, usize)> = Default::default();
+        for p in &world.players {
+            if let Some(tid) = &p.team_id {
+                let e = sums.entry(tid.clone()).or_insert((0.0, 0));
+                e.0 += p.ovr as f64;
+                e.1 += 1;
+            }
+        }
+        sums.into_iter()
+            .map(|(k, (s, n))| (k, if n == 0 { 0.0 } else { s / n as f64 }))
+            .collect()
+    };
+    let mut ranked: Vec<&domain::team::Team> = world.teams.iter().collect();
+    ranked.sort_by(|a, b| {
+        team_ovr
+            .get(&a.id)
+            .unwrap_or(&0.0)
+            .partial_cmp(team_ovr.get(&b.id).unwrap_or(&0.0))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let team_id = match pick {
+        ClubPick::Index(i) => world
+            .teams
+            .get(*i)
+            .map(|t| t.id.clone())
+            .unwrap_or_else(|| world.teams[0].id.clone()),
+        ClubPick::Strength(rank) => ranked
+            .get(*rank)
+            .map(|t| t.id.clone())
+            .unwrap_or_else(|| ranked[0].id.clone()),
+    };
+    let team = world.teams.iter().find(|t| t.id == team_id).expect("team exists");
     let mut manager = Manager::new(
         "headless-mgr".to_string(),
         "Headless".to_string(),
@@ -57,7 +101,7 @@ pub fn build_game(seed: u64) -> Game {
         "1980-01-01".to_string(),
         "England".to_string(),
     );
-    manager.hire(first_team.id.clone());
+    manager.hire(team.id.clone());
 
     let team_ids: Vec<String> = world.teams.iter().map(|t| t.id.clone()).collect();
     let mut game = Game::new(clock, manager, world.teams, world.players, world.staff, vec![]);
@@ -71,6 +115,11 @@ pub fn build_game(seed: u64) -> Game {
     ));
     ofm_core::season_context::refresh_game_context(&mut game);
     game
+}
+
+/// Backward-compatible default: manage the first team of the world.
+pub fn build_game(seed: u64) -> Game {
+    build_game_for_club(seed, &ClubPick::Index(0))
 }
 
 /// The agent's information set at the current date.

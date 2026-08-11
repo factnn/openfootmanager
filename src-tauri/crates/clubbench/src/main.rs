@@ -39,6 +39,9 @@ enum Commands {
         seeds: String,
         #[arg(long, default_value_t = 400)]
         days: u64,
+        /// Managed club by squad-strength rank (0 = weakest, 15 = strongest)
+        #[arg(long)]
+        club: Option<usize>,
     },
 }
 
@@ -47,19 +50,21 @@ fn main() {
     match cli.command {
         Commands::Gate0 { seeds, days } => gate0(&seeds, days),
         Commands::Cadence { seeds, days } => cadence(&seeds, days),
-        Commands::Score { seeds, days } => score_cmd(&seeds, days),
+        Commands::Score { seeds, days, club } => score_cmd(&seeds, days, club),
     }
 }
 
-fn score_cmd(seeds_str: &str, days: u64) {
+fn score_cmd(seeds_str: &str, days: u64, club: Option<usize>) {
     let seeds: Vec<u64> = seeds_str
         .split(',')
         .filter_map(|s| s.trim().parse().ok())
         .collect();
+    let pick = club.map(|rank| clubbench::env::ClubPick::Strength(rank));
     println!(
-        "ClubBench Score — paired-seed, reference-relative ({} seeds, {} days)",
+        "ClubBench Score — paired-seed, reference-relative ({} seeds, {} days, club={:?})",
         seeds.len(),
-        days
+        days,
+        club
     );
     println!("reference = ClubBench-Heuristic-v1 (frozen AutoManager, Attacking)\n");
 
@@ -71,7 +76,10 @@ fn score_cmd(seeds_str: &str, days: u64) {
     ];
 
     for candidate in candidates.iter_mut() {
-        let (_, reports) = score::collect_paired(&seeds, days, candidate.as_mut());
+        let (_, reports) = match &pick {
+            Some(p) => score::collect_paired_for(p, &seeds, days, candidate.as_mut()),
+            None => score::collect_paired(&seeds, days, candidate.as_mut()),
+        };
         println!("=== {} vs reference ===", candidate.name());
         print!("{}", score::render_reports(&reports));
         println!();

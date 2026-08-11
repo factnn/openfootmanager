@@ -90,11 +90,16 @@ pub struct Episode {
 }
 
 impl Episode {
-    /// Start a reproducible episode: `seed` fixes the world and trajectory;
-    /// `horizon_days` bounds the episode length.
+    /// Start a reproducible episode managing the first club: `seed` fixes the
+    /// world and trajectory; `horizon_days` bounds the episode length.
     pub fn new(seed: u64, horizon_days: u64) -> Self {
+        Self::new_with_pick(seed, &env::ClubPick::Index(0), horizon_days)
+    }
+
+    /// Start a reproducible episode managing the club selected by `pick`.
+    pub fn new_with_pick(seed: u64, pick: &env::ClubPick, horizon_days: u64) -> Self {
         ofm_core::rng::set_seed(seed);
-        let game = env::build_game(seed);
+        let game = env::build_game_for_club(seed, pick);
         Self {
             game,
             step: 0,
