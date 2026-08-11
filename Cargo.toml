@@ -1,0 +1,23 @@
+# Workspace root for the Openfoot Manager simulator (the environment backend).
+#
+# The ClubBench benchmark layer (env / harness / scoring) lives in the separate
+# `clubbench` repository and depends on `ofm_core` here via a pinned git
+# dependency. This root manifest exists so Cargo can resolve those packages
+# from the repository root.
+[workspace]
+resolver = "2"
+members = [
+    "src-tauri",
+    "src-tauri/crates/ofm_core",
+    "src-tauri/crates/db",
+    "src-tauri/crates/domain",
+    "src-tauri/crates/engine",
+    "src-tauri/crates/sim-bench",
+    "src-tauri/crates/ofm-cli",
+]
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
