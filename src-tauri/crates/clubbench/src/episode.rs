@@ -121,6 +121,9 @@ pub struct Episode {
     pub game: Game,
     pub step: u64,
     pub mode: env::AgentMode,
+    pub(crate) initial_net_worth: i64,
+    /// Net transfer spend over the episode (buying − selling income).
+    pub(crate) net_spend: i64,
     horizon_days: u64,
     advanced_days: u64,
     /// Offer ids already shown to the agent — new offers (never-seen ids) are
@@ -164,10 +167,13 @@ impl Episode {
     ) -> Self {
         ofm_core::rng::set_seed(seed);
         let game = env::build_game_for_club_with(seed, pick, world, budget);
+        let initial_net_worth = env::net_worth(&game);
         Self {
             game,
             step: 0,
             mode,
+            initial_net_worth,
+            net_spend: 0,
             horizon_days,
             advanced_days: 0,
             seen_offers: Default::default(),
@@ -293,7 +299,17 @@ impl Episode {
                 env::apply_play_style(&mut self.game, play_style);
             }
             Action::AcceptOffer { player_id, offer_id } => {
+                // Record the sale income before the offer is consumed.
+                let income = self
+                    .game
+                    .players
+                    .iter()
+                    .find(|p| p.id == player_id)
+                    .and_then(|p| p.transfer_offers.iter().find(|o| o.id == offer_id))
+                    .map(|o| o.fee as i64)
+                    .unwrap_or(0);
                 let _ = transfers::respond_to_offer(&mut self.game, &player_id, &offer_id, true);
+                self.net_spend -= income;
             }
             Action::RejectOffer { player_id, offer_id } => {
                 let _ = transfers::respond_to_offer(&mut self.game, &player_id, &offer_id, false);
@@ -302,7 +318,12 @@ impl Episode {
                 let _ = transfers::counter_offer(&mut self.game, &player_id, &offer_id, fee);
             }
             Action::MakeBid { player_id, fee } => {
-                let _ = transfers::make_transfer_bid(&mut self.game, &player_id, fee);
+                let outcome = transfers::make_transfer_bid(&mut self.game, &player_id, fee);
+                if let Ok(o) = outcome {
+                    if o.decision == transfers::TransferNegotiationDecision::Accepted {
+                        self.net_spend += fee as i64;
+                    }
+                }
             }
             Action::Scout { player_id } => {
                 if let Some(scout_id) = self.user_scout_id() {

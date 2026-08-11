@@ -129,14 +129,18 @@ pub fn score_dimension(samples: &[PairedSample], dim: &Dimension) -> DimReport {
     }
 }
 
-/// The six dimensions scored by ClubBench v0.1 (sport + finance + squad).
-/// `squad_size` is reported so that selling (players leaving) and buying
-/// (players joining) are directly visible; its "better" direction is
-/// scenario-dependent, so it is scored with `higher_better: false` (a trimmed
+/// The dimensions scored by ClubBench (sport + finance + squad).
+///
+/// Finance is scored on **net_value** (total wealth created: squad value +
+/// balance change over the episode) and **net_spend** (transfer outlay), NOT
+/// on raw ending balance — a rich club that burns £80M must not outscore a
+/// frugal club that achieves the same with £10M. `squad_size`'s "better"
+/// direction is scenario-dependent; it is scored lower-is-better (a trimmed
 /// squad reads as the manager having moved players on).
-pub const DIMENSIONS: [Dimension; 6] = [
+pub const DIMENSIONS: [Dimension; 7] = [
     Dimension { name: "points", higher_better: true },
-    Dimension { name: "balance", higher_better: true },
+    Dimension { name: "net_value", higher_better: true },
+    Dimension { name: "net_spend", higher_better: false },
     Dimension { name: "wage_bill", higher_better: false },
     Dimension { name: "squad_value", higher_better: true },
     Dimension { name: "avg_age", higher_better: false },
@@ -146,7 +150,8 @@ pub const DIMENSIONS: [Dimension; 6] = [
 fn metric_value(m: &ClubMetrics, name: &str) -> f64 {
     match name {
         "points" => m.points as f64,
-        "balance" => m.balance as f64,
+        "net_value" => m.net_value as f64,
+        "net_spend" => m.net_spend as f64,
         "wage_bill" => m.wage_bill as f64,
         "squad_value" => m.squad_value as f64,
         "avg_age" => m.avg_age,
@@ -220,6 +225,55 @@ pub fn collect_paired_for_mode(
         .collect();
     let samples: Vec<PairedSample> = per_dim.into_iter().next().unwrap_or_default();
     (samples, reports)
+}
+
+/// Mean raw metrics of the reference policy over `seeds` — the difficulty
+/// anchor for a scenario cell (its points, ending balance, squad, etc.).
+pub fn reference_mean_metrics(
+    pick: &ClubPick,
+    world: WorldSize,
+    budget: &ScenarioBudget,
+    mode: AgentMode,
+    seeds: &[u64],
+    horizon_days: u64,
+) -> ClubMetrics {
+    let mut reference = reference_for(mode);
+    let mut sum: Option<ClubMetrics> = None;
+    for &seed in seeds {
+        let r = run_episode_cadence_with_mode(seed, pick, world, budget, mode, horizon_days, reference.as_mut());
+        let m = r.metrics;
+        sum = Some(match sum {
+            None => m.clone(),
+            Some(s) => ClubMetrics {
+                points: s.points + m.points,
+                position: s.position + m.position,
+                goal_difference: s.goal_difference + m.goal_difference,
+                balance: s.balance + m.balance,
+                transfer_budget: s.transfer_budget + m.transfer_budget,
+                wage_bill: s.wage_bill + m.wage_bill,
+                squad_value: s.squad_value + m.squad_value,
+                avg_age: s.avg_age + m.avg_age,
+                squad_size: s.squad_size + m.squad_size,
+                net_value: s.net_value + m.net_value,
+                net_spend: s.net_spend + m.net_spend,
+            },
+        });
+    }
+    let s = sum.unwrap_or_default();
+    let n = seeds.len().max(1) as f64;
+    ClubMetrics {
+        points: (s.points as f64 / n) as u32,
+        position: (s.position as f64 / n) as usize,
+        goal_difference: (s.goal_difference as f64 / n) as i32,
+        balance: (s.balance as f64 / n) as i64,
+        transfer_budget: (s.transfer_budget as f64 / n) as i64,
+        wage_bill: (s.wage_bill as f64 / n) as u64,
+        squad_value: (s.squad_value as f64 / n) as u64,
+        avg_age: s.avg_age / n,
+        squad_size: (s.squad_size as f64 / n) as usize,
+        net_value: (s.net_value as f64 / n) as i64,
+        net_spend: (s.net_spend as f64 / n) as i64,
+    }
 }
 
 /// Render the dimension reports as a compact table.

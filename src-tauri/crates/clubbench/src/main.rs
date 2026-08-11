@@ -132,7 +132,7 @@ fn run_benchmark(
         println!();
     }
 
-    let dims = ["points", "balance", "wage_bill", "squad_value", "avg_age", "squad_size"];
+    let dims = ["points", "net_value", "net_spend", "wage_bill", "squad_value", "avg_age", "squad_size"];
     let mut candidates: Vec<Box<dyn Policy>> = if mode == AgentMode::Coach {
         vec![
             Box::new(clubbench::episode_agents::CoachBestXI { play_style: domain::team::PlayStyle::Attacking }),
@@ -161,12 +161,11 @@ fn run_benchmark(
             let pick = ClubPick::Strength(club);
             println!("=== scenario={}  club-rank={} ===", scenario, club);
 
-            // Reference raw baseline (difficulty anchor) from the first candidate's report.
-            let (_, ref_reports) = collect_paired_for_mode(&pick, world, &budget, mode, &seeds, days, candidates[0].as_mut());
-            let refpts = ref_reports[0].reference_mean;
+            // Reference raw baseline (difficulty anchor): its own mean metrics.
+            let ref_m = clubbench::score::reference_mean_metrics(&pick, world, &budget, mode, &seeds, days);
             println!(
-                "  reference raw: pts={:.1}  balance={:.0}  squad_value={:.0}  squad_size={:.1}",
-                refpts, ref_reports[1].reference_mean, ref_reports[3].reference_mean, ref_reports[5].reference_mean
+                "  reference raw: pts={:.1}  balance={:.0}  net_value={:.0}  squad_value={:.0}  squad_size={:.1}",
+                ref_m.points, ref_m.balance, ref_m.net_value, ref_m.squad_value, ref_m.squad_size
             );
 
             println!("  {:<12} {}", "candidate", dims.iter().map(|d| format!("{:>9}", format!("{}(Z)", d))).collect::<Vec<_>>().join(" "));
