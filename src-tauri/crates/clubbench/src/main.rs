@@ -6,7 +6,7 @@
 
 use clubbench::agents::{Agent, BestXIAgent, NoopAgent, RandomXIAgent, StyleProbe, WorstXIAgent};
 use clubbench::episode_agents::{AutoManager, OffersOnlyManager, PassiveManager, Policy, ProactiveManager};
-use clubbench::run::{run_episode, run_episode_cadence};
+use clubbench::run::{run_episode, run_episode_cadence_for_world};
 use clubbench::score;
 use clap::{Parser, Subcommand};
 
@@ -32,6 +32,9 @@ enum Commands {
         seeds: String,
         #[arg(long, default_value_t = 400)]
         days: u64,
+        /// World size: medium (default) | standard | compact
+        #[arg(long, default_value = "medium")]
+        world: String,
     },
     /// Paired-seed, reference-relative scoring (the benchmark evaluation protocol)
     Score {
@@ -52,7 +55,7 @@ fn main() {
     let cli = Cli::parse();
     match cli.command {
         Commands::Gate0 { seeds, days } => gate0(&seeds, days),
-        Commands::Cadence { seeds, days } => cadence(&seeds, days),
+        Commands::Cadence { seeds, days, world } => cadence(&seeds, days, &world),
         Commands::Score { seeds, days, club, world } => score_cmd(&seeds, days, club, &world),
     }
 }
@@ -140,18 +143,19 @@ fn gate0(seeds_str: &str, days: u64) {
     }
 }
 
-fn cadence(seeds_str: &str, days: u64) {
+fn cadence(seeds_str: &str, days: u64, world: &str) {
     let seeds: Vec<u64> = seeds_str
         .split(',')
         .filter_map(|s| s.trim().parse().ok())
         .collect();
+    let world = world_size(world);
     let mut policies: Vec<Box<dyn Policy>> = vec![
         Box::new(AutoManager::new(domain::team::PlayStyle::Attacking)),
         Box::new(OffersOnlyManager),
         Box::new(PassiveManager),
     ];
 
-    println!("ClubBench Cadence — long decision trajectory ({} days/episode)", days);
+    println!("ClubBench Cadence — long decision trajectory ({} days/episode, world={:?})", days, world);
     println!(
         "{:<14} {:>5} {:>6} {:>4} {:>4} {:>4} {:>4} {:>5} {:>8}",
         "policy", "seed", "steps", "pos", "P", "W", "D", "pts", "GF:GA"
@@ -160,7 +164,7 @@ fn cadence(seeds_str: &str, days: u64) {
     let mut agg: std::collections::BTreeMap<String, (f64, f64, f64, f64)> = std::collections::BTreeMap::new();
     for seed in &seeds {
         for policy in policies.iter_mut() {
-            let r = run_episode_cadence(*seed, days, policy.as_mut());
+            let r = run_episode_cadence_for_world(*seed, &clubbench::env::ClubPick::Index(0), world, days, policy.as_mut());
             println!(
                 "{:<14} {:>5} {:>6} {:>4} {:>4} {:>4} {:>4} {:>5} {:>3}:{:<3}",
                 policy.name(), seed, r.steps, r.metrics.position, r.played, r.won, r.drawn, r.metrics.points, r.goals_for, r.goals_against
