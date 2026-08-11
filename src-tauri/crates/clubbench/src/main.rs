@@ -5,7 +5,9 @@
 //!              matchday and transfer offer, producing a long decision trajectory.
 
 use clubbench::agents::{Agent, BestXIAgent, NoopAgent, RandomXIAgent, StyleProbe, WorstXIAgent};
-use clubbench::episode_agents::{AutoManager, OffersOnlyManager, PassiveManager, Policy, ProactiveManager};
+use clubbench::episode_agents::{
+    AutoManager, OffersOnlyManager, PassiveManager, Policy, ProactiveManager, SellingManager,
+};
 use clubbench::run::{run_episode, run_episode_cadence_for_world};
 use clubbench::score;
 use clap::{Parser, Subcommand};
@@ -88,6 +90,7 @@ fn score_cmd(seeds_str: &str, days: u64, club: Option<usize>, world: &str) {
         Box::new(AutoManager::new(domain::team::PlayStyle::Attacking)),
         Box::new(AutoManager::new(domain::team::PlayStyle::Balanced)),
         Box::new(ProactiveManager::new(domain::team::PlayStyle::Attacking)),
+        Box::new(SellingManager::new(domain::team::PlayStyle::Attacking)),
         Box::new(OffersOnlyManager),
         Box::new(PassiveManager),
     ];

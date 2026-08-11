@@ -39,6 +39,8 @@ pub enum Action {
     MakeBid { player_id: String, fee: u64 },
     /// Send a scout to report on a player (reveals fuzzed rating + potential band).
     Scout { player_id: String },
+    /// Transfer-list one of our players for sale — attracts incoming offers.
+    ListPlayer { player_id: String },
 }
 
 /// An incoming transfer offer for one of our players (status `Pending`).
@@ -290,6 +292,18 @@ impl Episode {
                     let _ = ofm_core::scouting::send_scout(&mut self.game, &scout_id, &player_id);
                 }
             }
+            Action::ListPlayer { player_id } => {
+                if let Some(team_id) = self.game.manager.team_id.as_ref() {
+                    if let Some(player) = self
+                        .game
+                        .players
+                        .iter_mut()
+                        .find(|p| p.id == player_id && p.team_id.as_ref() == Some(team_id))
+                    {
+                        player.transfer_listed = true;
+                    }
+                }
+            }
         }
     }
 
@@ -359,6 +373,7 @@ impl Episode {
                 fitness: p.fitness,
                 morale: p.morale,
                 injured: p.injury.is_some(),
+                transfer_listed: p.transfer_listed,
                 wage: p.wage,
                 market_value: p.market_value,
             })

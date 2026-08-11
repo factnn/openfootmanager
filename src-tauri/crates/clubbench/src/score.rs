@@ -118,13 +118,18 @@ pub fn score_dimension(samples: &[PairedSample], dim: &Dimension) -> DimReport {
     }
 }
 
-/// The five dimensions scored by ClubBench v0.1 (sport + finance + squad).
-pub const DIMENSIONS: [Dimension; 5] = [
+/// The six dimensions scored by ClubBench v0.1 (sport + finance + squad).
+/// `squad_size` is reported so that selling (players leaving) and buying
+/// (players joining) are directly visible; its "better" direction is
+/// scenario-dependent, so it is scored with `higher_better: false` (a trimmed
+/// squad reads as the manager having moved players on).
+pub const DIMENSIONS: [Dimension; 6] = [
     Dimension { name: "points", higher_better: true },
     Dimension { name: "balance", higher_better: true },
     Dimension { name: "wage_bill", higher_better: false },
     Dimension { name: "squad_value", higher_better: true },
     Dimension { name: "avg_age", higher_better: false },
+    Dimension { name: "squad_size", higher_better: false },
 ];
 
 fn metric_value(m: &ClubMetrics, name: &str) -> f64 {
@@ -134,6 +139,7 @@ fn metric_value(m: &ClubMetrics, name: &str) -> f64 {
         "wage_bill" => m.wage_bill as f64,
         "squad_value" => m.squad_value as f64,
         "avg_age" => m.avg_age,
+        "squad_size" => m.squad_size as f64,
         _ => 0.0,
     }
 }

@@ -28,6 +28,7 @@ pub struct PlayerView {
     pub fitness: u8,
     pub morale: u8,
     pub injured: bool,
+    pub transfer_listed: bool,
     pub wage: u32,
     pub market_value: u64,
 }
@@ -275,6 +276,7 @@ pub fn observe(game: &Game) -> Observation {
             fitness: p.fitness,
             morale: p.morale,
             injured: p.injury.is_some(),
+            transfer_listed: p.transfer_listed,
             wage: p.wage,
             market_value: p.market_value,
         })
