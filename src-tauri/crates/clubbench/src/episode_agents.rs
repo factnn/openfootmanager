@@ -197,6 +197,94 @@ impl Policy for ProactiveManager {
     }
 }
 
+/// A manager that actively sells: transfer-lists the oldest backup players to
+/// attract offers, then accepts anything at/above 1.3× market value. Exercises
+/// the ListPlayer / AcceptOffer / RejectOffer actions (the selling side).
+pub struct SellingManager {
+    pub play_style: PlayStyle,
+    listed: std::collections::HashSet<String>,
+}
+
+impl SellingManager {
+    pub fn new(play_style: PlayStyle) -> Self {
+        Self {
+            play_style,
+            listed: Default::default(),
+        }
+    }
+    fn best_lineup(&self, obs: &EpisodeObservation) -> Vec<String> {
+        let slots = ofm_core::player_rating::formation_slots(&obs.formation);
+        let mut pool: Vec<&crate::env::PlayerView> = obs.squad.iter().filter(|p| !p.injured).collect();
+        let mut xi = Vec::new();
+        for slot in slots.iter().take(11) {
+            let group = slot.to_group_position();
+            let mut best = None;
+            let mut best_rating: f64 = f64::MIN;
+            for (i, p) in pool.iter().enumerate() {
+                let rating = if p.group_position == group { p.ovr as f64 } else { p.ovr as f64 - 8.0 };
+                let rating = if p.condition < 55 { rating - 25.0 } else { rating };
+                if rating > best_rating {
+                    best_rating = rating;
+                    best = Some(i);
+                }
+            }
+            if let Some(i) = best {
+                xi.push(pool.remove(i).id.clone());
+            }
+        }
+        xi
+    }
+}
+
+impl Policy for SellingManager {
+    fn name(&self) -> &str {
+        "Selling"
+    }
+    fn act(&mut self, obs: &EpisodeObservation) -> Action {
+        if obs.is_matchday {
+            return Action::SetMatchPlan {
+                player_ids: self.best_lineup(obs),
+                play_style: self.play_style.clone(),
+            };
+        }
+        if !obs.offers.is_empty() {
+            let offer = &obs.offers[0];
+            let value = obs
+                .squad
+                .iter()
+                .find(|p| p.id == offer.player_id)
+                .map(|p| p.market_value as u64)
+                .unwrap_or(0);
+            if offer.fee >= value * 9 / 10 {
+                return Action::AcceptOffer {
+                    player_id: offer.player_id.clone(),
+                    offer_id: offer.offer_id.clone(),
+                };
+            }
+            return Action::RejectOffer {
+                player_id: offer.player_id.clone(),
+                offer_id: offer.offer_id.clone(),
+            };
+        }
+        // On a market day, list the most valuable unlisted backup to attract a
+        // meaningful offer (selling a bench asset for cash).
+        let xi = self.best_lineup(obs);
+        if let Some(target) = obs
+            .squad
+            .iter()
+            .filter(|p| !p.injured && p.age >= 24 && !xi.contains(&p.id) && !p.transfer_listed)
+            .max_by_key(|p| p.market_value)
+        {
+            if self.listed.insert(target.id.clone()) {
+                return Action::ListPlayer {
+                    player_id: target.id.clone(),
+                };
+            }
+        }
+        Action::Continue
+    }
+}
+
 /// Resolve every pending offer, accepting above 1.2× value — but never touch
 /// the lineup or the market. Isolates the transfer-decision contribution.
 pub struct OffersOnlyManager;
