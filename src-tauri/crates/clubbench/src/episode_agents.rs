@@ -57,8 +57,9 @@ impl Policy for AutoManager {
     }
     fn act(&mut self, obs: &EpisodeObservation) -> Action {
         if obs.is_matchday {
-            return Action::SetLineup {
+            return Action::SetMatchPlan {
                 player_ids: self.best_lineup(obs),
+                play_style: self.play_style.clone(),
             };
         }
         if !obs.offers.is_empty() {

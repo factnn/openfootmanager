@@ -11,3 +11,4 @@ pub mod env;
 pub mod episode;
 pub mod episode_agents;
 pub mod run;
+pub mod score;

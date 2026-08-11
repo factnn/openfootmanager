@@ -7,6 +7,7 @@
 use clubbench::agents::{Agent, BestXIAgent, NoopAgent, RandomXIAgent, StyleProbe, WorstXIAgent};
 use clubbench::episode_agents::{AutoManager, OffersOnlyManager, PassiveManager, Policy};
 use clubbench::run::{run_episode, run_episode_cadence};
+use clubbench::score;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
@@ -32,6 +33,13 @@ enum Commands {
         #[arg(long, default_value_t = 400)]
         days: u64,
     },
+    /// Paired-seed, reference-relative scoring (the benchmark evaluation protocol)
+    Score {
+        #[arg(long, default_value = "42,43,44,45,46,47,48,49")]
+        seeds: String,
+        #[arg(long, default_value_t = 400)]
+        days: u64,
+    },
 }
 
 fn main() {
@@ -39,6 +47,34 @@ fn main() {
     match cli.command {
         Commands::Gate0 { seeds, days } => gate0(&seeds, days),
         Commands::Cadence { seeds, days } => cadence(&seeds, days),
+        Commands::Score { seeds, days } => score_cmd(&seeds, days),
+    }
+}
+
+fn score_cmd(seeds_str: &str, days: u64) {
+    let seeds: Vec<u64> = seeds_str
+        .split(',')
+        .filter_map(|s| s.trim().parse().ok())
+        .collect();
+    println!(
+        "ClubBench Score — paired-seed, reference-relative ({} seeds, {} days)",
+        seeds.len(),
+        days
+    );
+    println!("reference = ClubBench-Heuristic-v1 (frozen AutoManager, Attacking)\n");
+
+    let mut candidates: Vec<Box<dyn Policy>> = vec![
+        Box::new(AutoManager::new(domain::team::PlayStyle::Attacking)),
+        Box::new(AutoManager::new(domain::team::PlayStyle::Balanced)),
+        Box::new(OffersOnlyManager),
+        Box::new(PassiveManager),
+    ];
+
+    for candidate in candidates.iter_mut() {
+        let (_, reports) = score::collect_paired(&seeds, days, candidate.as_mut());
+        println!("=== {} vs reference ===", candidate.name());
+        print!("{}", score::render_reports(&reports));
+        println!();
     }
 }
 
@@ -67,11 +103,11 @@ fn gate0(seeds_str: &str, days: u64) {
             let r = run_episode(*seed, days, agent.as_ref());
             println!(
                 "{:<18} {:>5} {:>4} {:>4} {:>4} {:>4} {:>5} {:>3}:{:<3}",
-                agent.name(), seed, r.position, r.played, r.won, r.drawn, r.points, r.goals_for, r.goals_against
+                agent.name(), seed, r.metrics.position, r.played, r.won, r.drawn, r.metrics.points, r.goals_for, r.goals_against
             );
             let e = agg.entry(agent.name().to_string()).or_insert((0.0, 0.0, 0.0));
-            e.0 += r.position as f64;
-            e.1 += r.points as f64;
+            e.0 += r.metrics.position as f64;
+            e.1 += r.metrics.points as f64;
             e.2 += 1.0;
         }
         println!();
@@ -105,12 +141,12 @@ fn cadence(seeds_str: &str, days: u64) {
             let r = run_episode_cadence(*seed, days, policy.as_mut());
             println!(
                 "{:<14} {:>5} {:>6} {:>4} {:>4} {:>4} {:>4} {:>5} {:>3}:{:<3}",
-                policy.name(), seed, r.steps, r.position, r.played, r.won, r.drawn, r.points, r.goals_for, r.goals_against
+                policy.name(), seed, r.steps, r.metrics.position, r.played, r.won, r.drawn, r.metrics.points, r.goals_for, r.goals_against
             );
             let e = agg.entry(policy.name().to_string()).or_insert((0.0, 0.0, 0.0, 0.0));
             e.0 += r.steps as f64;
-            e.1 += r.position as f64;
-            e.2 += r.points as f64;
+            e.1 += r.metrics.position as f64;
+            e.2 += r.metrics.points as f64;
             e.3 += 1.0;
         }
         println!();
