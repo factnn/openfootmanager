@@ -13,7 +13,7 @@
 //!      leaderboard stays interpretable ("took 46 points, spent £2M less than
 //!      the reference manager").
 
-use crate::env::{ClubPick, WorldSize};
+use crate::env::{ClubPick, ScenarioBudget, WorldSize};
 use crate::episode_agents::{AutoManager, Policy};
 use crate::run::{run_episode_cadence_for_world, CadenceResult, ClubMetrics};
 use domain::team::PlayStyle;
@@ -161,13 +161,14 @@ pub fn collect_paired_for(
     horizon_days: u64,
     candidate: &mut dyn Policy,
 ) -> (Vec<PairedSample>, Vec<DimReport>) {
-    collect_paired_for_world(pick, WorldSize::Medium, seeds, horizon_days, candidate)
+    collect_paired_for_world(pick, WorldSize::Medium, &ScenarioBudget::default(), seeds, horizon_days, candidate)
 }
 
-/// As [`collect_paired_for`], with an explicit world size.
+/// As [`collect_paired_for`], with an explicit world size and budget.
 pub fn collect_paired_for_world(
     pick: &ClubPick,
     world: WorldSize,
+    budget: &ScenarioBudget,
     seeds: &[u64],
     horizon_days: u64,
     candidate: &mut dyn Policy,
@@ -177,8 +178,8 @@ pub fn collect_paired_for_world(
     let mut per_dim: Vec<Vec<PairedSample>> = DIMENSIONS.iter().map(|_| Vec::new()).collect();
 
     for &seed in seeds {
-        let ref_res: CadenceResult = run_episode_cadence_for_world(seed, pick, world, horizon_days, &mut reference);
-        let cand_res: CadenceResult = run_episode_cadence_for_world(seed, pick, world, horizon_days, candidate);
+        let ref_res: CadenceResult = run_episode_cadence_for_world(seed, pick, world, budget, horizon_days, &mut reference);
+        let cand_res: CadenceResult = run_episode_cadence_for_world(seed, pick, world, budget, horizon_days, candidate);
         for (i, dim) in DIMENSIONS.iter().enumerate() {
             per_dim[i].push(PairedSample {
                 seed,

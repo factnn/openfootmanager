@@ -37,6 +37,9 @@ enum Commands {
         /// World size: medium (default) | standard | compact
         #[arg(long, default_value = "medium")]
         world: String,
+        /// Scenario budget: crisis | moneyball | rebuild (default) | title
+        #[arg(long, default_value = "rebuild")]
+        scenario: String,
     },
     /// Paired-seed, reference-relative scoring (the benchmark evaluation protocol)
     Score {
@@ -50,6 +53,9 @@ enum Commands {
         /// World size: medium (default, ~120 clubs) | standard (~440) | compact (~16)
         #[arg(long, default_value = "medium")]
         world: String,
+        /// Scenario budget: crisis | moneyball | rebuild (default) | title
+        #[arg(long, default_value = "rebuild")]
+        scenario: String,
     },
 }
 
@@ -57,8 +63,8 @@ fn main() {
     let cli = Cli::parse();
     match cli.command {
         Commands::Gate0 { seeds, days } => gate0(&seeds, days),
-        Commands::Cadence { seeds, days, world } => cadence(&seeds, days, &world),
-        Commands::Score { seeds, days, club, world } => score_cmd(&seeds, days, club, &world),
+        Commands::Cadence { seeds, days, world, scenario } => cadence(&seeds, days, &world, &scenario),
+        Commands::Score { seeds, days, club, world, scenario } => score_cmd(&seeds, days, club, &world, &scenario),
     }
 }
 
@@ -70,19 +76,21 @@ fn world_size(s: &str) -> clubbench::env::WorldSize {
     }
 }
 
-fn score_cmd(seeds_str: &str, days: u64, club: Option<usize>, world: &str) {
+fn score_cmd(seeds_str: &str, days: u64, club: Option<usize>, world: &str, scenario: &str) {
     let seeds: Vec<u64> = seeds_str
         .split(',')
         .filter_map(|s| s.trim().parse().ok())
         .collect();
     let pick = club.map(|rank| clubbench::env::ClubPick::Strength(rank));
     let world = world_size(world);
+    let budget = clubbench::env::ScenarioBudget::by_name(scenario);
     println!(
-        "ClubBench Score — paired-seed, reference-relative ({} seeds, {} days, club={:?}, world={:?})",
+        "ClubBench Score — paired-seed, reference-relative ({} seeds, {} days, club={:?}, world={:?}, scenario={})",
         seeds.len(),
         days,
         club,
-        world
+        world,
+        scenario
     );
     println!("reference = ClubBench-Heuristic-v1 (frozen AutoManager, Attacking)\n");
 
@@ -97,7 +105,7 @@ fn score_cmd(seeds_str: &str, days: u64, club: Option<usize>, world: &str) {
 
     for candidate in candidates.iter_mut() {
         let (_, reports) = match &pick {
-            Some(p) => score::collect_paired_for_world(p, world, &seeds, days, candidate.as_mut()),
+            Some(p) => score::collect_paired_for_world(p, world, &budget, &seeds, days, candidate.as_mut()),
             None => score::collect_paired(&seeds, days, candidate.as_mut()),
         };
         println!("=== {} vs reference ===", candidate.name());
@@ -146,19 +154,20 @@ fn gate0(seeds_str: &str, days: u64) {
     }
 }
 
-fn cadence(seeds_str: &str, days: u64, world: &str) {
+fn cadence(seeds_str: &str, days: u64, world: &str, scenario: &str) {
     let seeds: Vec<u64> = seeds_str
         .split(',')
         .filter_map(|s| s.trim().parse().ok())
         .collect();
     let world = world_size(world);
+    let budget = clubbench::env::ScenarioBudget::by_name(scenario);
     let mut policies: Vec<Box<dyn Policy>> = vec![
         Box::new(AutoManager::new(domain::team::PlayStyle::Attacking)),
         Box::new(OffersOnlyManager),
         Box::new(PassiveManager),
     ];
 
-    println!("ClubBench Cadence — long decision trajectory ({} days/episode, world={:?})", days, world);
+    println!("ClubBench Cadence — long decision trajectory ({} days/episode, world={:?}, scenario={})", days, world, scenario);
     println!(
         "{:<14} {:>5} {:>6} {:>4} {:>4} {:>4} {:>4} {:>5} {:>8}",
         "policy", "seed", "steps", "pos", "P", "W", "D", "pts", "GF:GA"
@@ -167,7 +176,7 @@ fn cadence(seeds_str: &str, days: u64, world: &str) {
     let mut agg: std::collections::BTreeMap<String, (f64, f64, f64, f64)> = std::collections::BTreeMap::new();
     for seed in &seeds {
         for policy in policies.iter_mut() {
-            let r = run_episode_cadence_for_world(*seed, &clubbench::env::ClubPick::Index(0), world, days, policy.as_mut());
+            let r = run_episode_cadence_for_world(*seed, &clubbench::env::ClubPick::Index(0), world, &budget, days, policy.as_mut());
             println!(
                 "{:<14} {:>5} {:>6} {:>4} {:>4} {:>4} {:>4} {:>5} {:>3}:{:<3}",
                 policy.name(), seed, r.steps, r.metrics.position, r.played, r.won, r.drawn, r.metrics.points, r.goals_for, r.goals_against

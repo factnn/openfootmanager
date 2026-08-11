@@ -137,6 +137,51 @@ pub enum WorldSize {
     Standard,
 }
 
+/// The managed club's financial starting state — a scenario lever. The
+/// generated worlds' budgets scale with reputation and are unrealistically
+/// small, so each scenario defines the club's finances explicitly.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ScenarioBudget {
+    pub finance: i64,
+    pub transfer_budget: i64,
+    pub wage_budget: i64,
+}
+
+impl Default for ScenarioBudget {
+    /// The big-budget default (keeps the transfer market usable).
+    fn default() -> Self {
+        Self::rebuild()
+    }
+}
+
+impl ScenarioBudget {
+    /// Relegation fight — a tiny budget to work with.
+    pub fn crisis() -> Self {
+        Self { finance: 20_000_000, transfer_budget: 5_000_000, wage_budget: 2_000_000 }
+    }
+    /// Top-half on a tight budget — spend smart or not at all.
+    pub fn moneyball() -> Self {
+        Self { finance: 40_000_000, transfer_budget: 15_000_000, wage_budget: 2_500_000 }
+    }
+    /// Big-budget rebuild — room to buy, pressure to deliver.
+    pub fn rebuild() -> Self {
+        Self { finance: 60_000_000, transfer_budget: 50_000_000, wage_budget: 3_000_000 }
+    }
+    /// Title contender — top-tier finances.
+    pub fn title() -> Self {
+        Self { finance: 100_000_000, transfer_budget: 60_000_000, wage_budget: 3_500_000 }
+    }
+
+    pub fn by_name(name: &str) -> ScenarioBudget {
+        match name.trim().to_lowercase().as_str() {
+            "crisis" => Self::crisis(),
+            "moneyball" => Self::moneyball(),
+            "title" => Self::title(),
+            _ => Self::rebuild(),
+        }
+    }
+}
+
 fn world_config(size: WorldSize) -> WorldGenConfig {
     match size {
         WorldSize::Compact => WorldGenConfig::compact(),
@@ -152,7 +197,12 @@ fn world_config(size: WorldSize) -> WorldGenConfig {
 /// managing the club chosen by `pick` in the given world size. The user's club
 /// plays in its own nation's division; other divisions simulate in the
 /// background, keeping the world economy and transfer market alive.
-pub fn build_game_for_club_with(seed: u64, pick: &ClubPick, world: WorldSize) -> Game {
+pub fn build_game_for_club_with(
+    seed: u64,
+    pick: &ClubPick,
+    world: WorldSize,
+    budget: &ScenarioBudget,
+) -> Game {
     let world = generate_world_data_seeded_with(seed, &world_config(world), None);
     let start = Utc.with_ymd_and_hms(2026, 7, 1, 0, 0, 0).unwrap();
     let clock = GameClock::new(start);
@@ -208,22 +258,21 @@ pub fn build_game_for_club_with(seed: u64, pick: &ClubPick, world: WorldSize) ->
     game.active_competition_ids = game.competitions.iter().map(|c| c.id.clone()).collect();
     game.sync_legacy_league();
     ofm_core::season_context::refresh_game_context(&mut game);
-    // Scenario budget: the generated clubs' budgets scale with reputation; give
-    // the managed club a "big-budget rebuild" starting state (a scenario lever).
+    // The scenario's financial starting state overrides the generated budgets.
     if let Some(tid) = game.manager.team_id.clone() {
         if let Some(team) = game.teams.iter_mut().find(|t| t.id == tid) {
-            team.finance = 60_000_000;
-            team.transfer_budget = 50_000_000;
-            team.wage_budget = 3_000_000;
+            team.finance = budget.finance;
+            team.transfer_budget = budget.transfer_budget;
+            team.wage_budget = budget.wage_budget;
         }
     }
     game
 }
 
-/// Build a fully playable game in the Medium world (default), managing the
-/// club chosen by `pick`.
+/// Build a fully playable game in the Medium world (default) with the default
+/// scenario budget, managing the club chosen by `pick`.
 pub fn build_game_for_club(seed: u64, pick: &ClubPick) -> Game {
-    build_game_for_club_with(seed, pick, WorldSize::Medium)
+    build_game_for_club_with(seed, pick, WorldSize::Medium, &ScenarioBudget::default())
 }
 
 /// Compact single-league world, managing the first team — used by the fast

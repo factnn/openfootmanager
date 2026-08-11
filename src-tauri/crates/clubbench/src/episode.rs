@@ -136,18 +136,20 @@ impl Episode {
 
     /// Start a reproducible episode managing the club selected by `pick`.
     pub fn new_with_pick(seed: u64, pick: &env::ClubPick, horizon_days: u64) -> Self {
-        Self::new_with_pick_and_world(seed, pick, env::WorldSize::Medium, horizon_days)
+        Self::new_with_pick_and_world(seed, pick, env::WorldSize::Medium, &env::ScenarioBudget::default(), horizon_days)
     }
 
-    /// Start a reproducible episode with an explicit world size.
+    /// Start a reproducible episode with an explicit world size and scenario
+    /// budget.
     pub fn new_with_pick_and_world(
         seed: u64,
         pick: &env::ClubPick,
         world: env::WorldSize,
+        budget: &env::ScenarioBudget,
         horizon_days: u64,
     ) -> Self {
         ofm_core::rng::set_seed(seed);
-        let game = env::build_game_for_club_with(seed, pick, world);
+        let game = env::build_game_for_club_with(seed, pick, world, budget);
         Self {
             game,
             step: 0,
