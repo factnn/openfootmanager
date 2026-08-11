@@ -13,8 +13,9 @@
 //!      leaderboard stays interpretable ("took 46 points, spent £2M less than
 //!      the reference manager").
 
+use crate::env::ClubPick;
 use crate::episode_agents::{AutoManager, Policy};
-use crate::run::{run_episode_cadence, CadenceResult, ClubMetrics};
+use crate::run::{run_episode_cadence_for, CadenceResult, ClubMetrics};
 use domain::team::PlayStyle;
 
 /// The frozen reference policy: ClubBench-Heuristic-v1. Code is fixed and
@@ -144,13 +145,23 @@ pub fn collect_paired(
     horizon_days: u64,
     candidate: &mut dyn Policy,
 ) -> (Vec<PairedSample>, Vec<DimReport>) {
+    collect_paired_for(&ClubPick::Index(0), seeds, horizon_days, candidate)
+}
+
+/// As [`collect_paired`], managing the club selected by `pick`.
+pub fn collect_paired_for(
+    pick: &ClubPick,
+    seeds: &[u64],
+    horizon_days: u64,
+    candidate: &mut dyn Policy,
+) -> (Vec<PairedSample>, Vec<DimReport>) {
     let mut reference = reference_v1();
     // per dimension -> Vec<PairedSample>
     let mut per_dim: Vec<Vec<PairedSample>> = DIMENSIONS.iter().map(|_| Vec::new()).collect();
 
     for &seed in seeds {
-        let ref_res: CadenceResult = run_episode_cadence(seed, horizon_days, &mut reference);
-        let cand_res: CadenceResult = run_episode_cadence(seed, horizon_days, candidate);
+        let ref_res: CadenceResult = run_episode_cadence_for(seed, pick, horizon_days, &mut reference);
+        let cand_res: CadenceResult = run_episode_cadence_for(seed, pick, horizon_days, candidate);
         for (i, dim) in DIMENSIONS.iter().enumerate() {
             per_dim[i].push(PairedSample {
                 seed,

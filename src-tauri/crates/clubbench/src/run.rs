@@ -149,7 +149,17 @@ pub fn run_episode_cadence(
     horizon_days: u64,
     policy: &mut dyn Policy,
 ) -> CadenceResult {
-    let mut ep = Episode::new(seed, horizon_days);
+    run_episode_cadence_for(seed, &env::ClubPick::Index(0), horizon_days, policy)
+}
+
+/// As [`run_episode_cadence`], managing the club selected by `pick`.
+pub fn run_episode_cadence_for(
+    seed: u64,
+    pick: &env::ClubPick,
+    horizon_days: u64,
+    policy: &mut dyn Policy,
+) -> CadenceResult {
+    let mut ep = Episode::new_with_pick(seed, pick, horizon_days);
     let mut obs = ep.observe();
     let mut guard = 0u64;
     while !obs.done && guard < 200_000 {
