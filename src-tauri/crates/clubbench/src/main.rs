@@ -39,9 +39,12 @@ enum Commands {
         seeds: String,
         #[arg(long, default_value_t = 400)]
         days: u64,
-        /// Managed club by squad-strength rank (0 = weakest, 15 = strongest)
+        /// Managed club by squad-strength rank (0 = weakest)
         #[arg(long)]
         club: Option<usize>,
+        /// World size: medium (default, ~120 clubs) | standard (~440) | compact (~16)
+        #[arg(long, default_value = "medium")]
+        world: String,
     },
 }
 
@@ -50,21 +53,31 @@ fn main() {
     match cli.command {
         Commands::Gate0 { seeds, days } => gate0(&seeds, days),
         Commands::Cadence { seeds, days } => cadence(&seeds, days),
-        Commands::Score { seeds, days, club } => score_cmd(&seeds, days, club),
+        Commands::Score { seeds, days, club, world } => score_cmd(&seeds, days, club, &world),
     }
 }
 
-fn score_cmd(seeds_str: &str, days: u64, club: Option<usize>) {
+fn world_size(s: &str) -> clubbench::env::WorldSize {
+    match s.trim().to_lowercase().as_str() {
+        "compact" => clubbench::env::WorldSize::Compact,
+        "standard" => clubbench::env::WorldSize::Standard,
+        _ => clubbench::env::WorldSize::Medium,
+    }
+}
+
+fn score_cmd(seeds_str: &str, days: u64, club: Option<usize>, world: &str) {
     let seeds: Vec<u64> = seeds_str
         .split(',')
         .filter_map(|s| s.trim().parse().ok())
         .collect();
     let pick = club.map(|rank| clubbench::env::ClubPick::Strength(rank));
+    let world = world_size(world);
     println!(
-        "ClubBench Score — paired-seed, reference-relative ({} seeds, {} days, club={:?})",
+        "ClubBench Score — paired-seed, reference-relative ({} seeds, {} days, club={:?}, world={:?})",
         seeds.len(),
         days,
-        club
+        club,
+        world
     );
     println!("reference = ClubBench-Heuristic-v1 (frozen AutoManager, Attacking)\n");
 
@@ -78,7 +91,7 @@ fn score_cmd(seeds_str: &str, days: u64, club: Option<usize>) {
 
     for candidate in candidates.iter_mut() {
         let (_, reports) = match &pick {
-            Some(p) => score::collect_paired_for(p, &seeds, days, candidate.as_mut()),
+            Some(p) => score::collect_paired_for_world(p, world, &seeds, days, candidate.as_mut()),
             None => score::collect_paired(&seeds, days, candidate.as_mut()),
         };
         println!("=== {} vs reference ===", candidate.name());

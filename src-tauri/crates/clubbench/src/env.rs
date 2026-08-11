@@ -1,16 +1,18 @@
 //! The environment: build a game, observe it, act on it, advance time.
 
-use chrono::{TimeZone, Utc};
-use domain::league::FixtureStatus;
+use chrono::{DateTime, TimeZone, Utc};
+use domain::league::{CompetitionFormat, CompetitionScope, CompetitionType, FixtureStatus, League};
 use domain::manager::Manager;
 use domain::player::Position;
 use ofm_core::clock::GameClock;
 use ofm_core::game::Game;
 use ofm_core::generator::{
-    generate_world_data_seeded_with, repair_opening_youth_academies, WorldGenConfig,
+    build_explicit_competition, generate_world_data_seeded_with, repair_opening_youth_academies,
+    CompetitionDefinition, FormatDef, ParticipantSpec, WorldGenConfig,
 };
 use ofm_core::turn;
 use serde::Serialize;
+use std::collections::BTreeMap;
 
 /// A player as the agent sees it (the visible information set — no hidden
 /// potential, no memory access).
@@ -52,14 +54,108 @@ pub enum ClubPick {
     Strength(usize),
 }
 
-/// Build a fully playable game for the user team chosen by `pick` from a
-/// seeded compact world. Mirrors `ofm_core/tests/scenario_tests.rs`.
-pub fn build_game_for_club(seed: u64, pick: &ClubPick) -> Game {
-    let world = generate_world_data_seeded_with(seed, &WorldGenConfig::compact(), None);
+/// Build the world's club competitions: one league per nation, split into
+/// divisions of up to 20 clubs ordered by squad strength (an approximation of
+/// the app's foundation-competition plan; continental cups come later).
+fn build_foundation_competitions(
+    world: &ofm_core::generator::WorldData,
+    start: DateTime<Utc>,
+) -> Vec<League> {
+    let mut team_ovr: BTreeMap<String, f64> = BTreeMap::new();
+    let mut sums: BTreeMap<String, (f64, usize)> = BTreeMap::new();
+    for p in &world.players {
+        if let Some(tid) = &p.team_id {
+            let e = sums.entry(tid.clone()).or_insert((0.0, 0));
+            e.0 += p.ovr as f64;
+            e.1 += 1;
+        }
+    }
+    for (k, (s, n)) in sums {
+        team_ovr.insert(k, if n == 0 { 0.0 } else { s / n as f64 });
+    }
+
+    let mut by_nation: BTreeMap<String, Vec<&domain::team::Team>> = BTreeMap::new();
+    for team in &world.teams {
+        by_nation
+            .entry(team.football_nation.clone())
+            .or_default()
+            .push(team);
+    }
+
+    let mut competitions = Vec::new();
+    for (nation, mut teams) in by_nation {
+        teams.sort_by(|a, b| {
+            team_ovr
+                .get(&b.id)
+                .unwrap_or(&0.0)
+                .partial_cmp(team_ovr.get(&a.id).unwrap_or(&0.0))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        for (div, chunk) in teams.chunks(20).enumerate() {
+            let def = CompetitionDefinition {
+                id: format!("{nation}-div{}", div + 1),
+                name: format!("{nation} Division {}", div + 1),
+                r#type: CompetitionType::League,
+                scope: CompetitionScope::Domestic,
+                region_id: None,
+                country_id: Some(nation.clone()),
+                required_region_ids: vec![],
+                priority: 0,
+                format: FormatDef {
+                    kind: CompetitionFormat::LeagueTable,
+                    legs: Some(2),
+                    group_size: None,
+                    qualifiers_per_group: None,
+                    best_third_qualifiers: None,
+                },
+                participants: ParticipantSpec {
+                    explicit: Some(chunk.iter().map(|t| t.id.clone()).collect()),
+                    selector: None,
+                },
+                berths: vec![],
+                season_start_month: None,
+                season_start_day: None,
+                name_key: None,
+                logo: None,
+            };
+            if let Some(league) = build_explicit_competition(&def, 2026, start) {
+                competitions.push(league);
+            }
+        }
+    }
+    competitions
+}
+
+/// World size for the benchmark env. `Standard` (~440 clubs) is the most
+/// realistic but ≈43 s per season; `Medium` (~120 clubs) is a practical
+/// balance; `Compact` is the fast toy world (fake economics).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum WorldSize {
+    Compact,
+    Medium,
+    Standard,
+}
+
+fn world_config(size: WorldSize) -> WorldGenConfig {
+    match size {
+        WorldSize::Compact => WorldGenConfig::compact(),
+        WorldSize::Medium => WorldGenConfig {
+            clubs_per_division: 20,
+            nations: ofm_core::generator::clubs::STANDARD_NATIONS[..3].to_vec(),
+        },
+        WorldSize::Standard => WorldGenConfig::standard(),
+    }
+}
+
+/// Build a fully playable game with proper multi-competition structure,
+/// managing the club chosen by `pick` in the given world size. The user's club
+/// plays in its own nation's division; other divisions simulate in the
+/// background, keeping the world economy and transfer market alive.
+pub fn build_game_for_club_with(seed: u64, pick: &ClubPick, world: WorldSize) -> Game {
+    let world = generate_world_data_seeded_with(seed, &world_config(world), None);
     let start = Utc.with_ymd_and_hms(2026, 7, 1, 0, 0, 0).unwrap();
     let clock = GameClock::new(start);
 
-    // Average squad strength per team, for Strength-based picks.
     let team_ovr: std::collections::HashMap<String, f64> = {
         let mut sums: std::collections::HashMap<String, (f64, usize)> = Default::default();
         for p in &world.players {
@@ -103,6 +199,47 @@ pub fn build_game_for_club(seed: u64, pick: &ClubPick) -> Game {
     );
     manager.hire(team.id.clone());
 
+    let competitions = build_foundation_competitions(&world, start);
+    let mut game = Game::new(clock, manager, world.teams, world.players, world.staff, vec![]);
+    game.available_staff_market_last_activity_date = Some(start.format("%Y-%m-%d").to_string());
+    repair_opening_youth_academies(&mut game);
+    game.competitions = competitions;
+    game.active_competition_ids = game.competitions.iter().map(|c| c.id.clone()).collect();
+    game.sync_legacy_league();
+    ofm_core::season_context::refresh_game_context(&mut game);
+    // Scenario budget: the generated clubs' budgets scale with reputation; give
+    // the managed club a "big-budget rebuild" starting state (a scenario lever).
+    if let Some(tid) = game.manager.team_id.clone() {
+        if let Some(team) = game.teams.iter_mut().find(|t| t.id == tid) {
+            team.finance = 60_000_000;
+            team.transfer_budget = 50_000_000;
+            team.wage_budget = 3_000_000;
+        }
+    }
+    game
+}
+
+/// Build a fully playable game in the Medium world (default), managing the
+/// club chosen by `pick`.
+pub fn build_game_for_club(seed: u64, pick: &ClubPick) -> Game {
+    build_game_for_club_with(seed, pick, WorldSize::Medium)
+}
+
+/// Compact single-league world, managing the first team — used by the fast
+/// Coach-track experiment (`gate0`). Not used by the decision-cadence env.
+pub fn build_game(seed: u64) -> Game {
+    let world = generate_world_data_seeded_with(seed, &WorldGenConfig::compact(), None);
+    let start = Utc.with_ymd_and_hms(2026, 7, 1, 0, 0, 0).unwrap();
+    let clock = GameClock::new(start);
+    let team = world.teams.first().expect("world has teams");
+    let mut manager = Manager::new(
+        "headless-mgr".to_string(),
+        "Headless".to_string(),
+        "Manager".to_string(),
+        "1980-01-01".to_string(),
+        "England".to_string(),
+    );
+    manager.hire(team.id.clone());
     let team_ids: Vec<String> = world.teams.iter().map(|t| t.id.clone()).collect();
     let mut game = Game::new(clock, manager, world.teams, world.players, world.staff, vec![]);
     game.available_staff_market_last_activity_date = Some(start.format("%Y-%m-%d").to_string());
@@ -114,23 +251,7 @@ pub fn build_game_for_club(seed: u64, pick: &ClubPick) -> Game {
         start,
     ));
     ofm_core::season_context::refresh_game_context(&mut game);
-    // Scenario budget: the compact world's generated clubs have unrealistically
-    // small budgets (~£600k) that make the transfer market unusable. A scenario
-    // defines the club's financial starting state — here a "big-budget rebuild"
-    // club. (Per-scenario budgets become a first-class env parameter next.)
-    if let Some(tid) = game.manager.team_id.clone() {
-        if let Some(team) = game.teams.iter_mut().find(|t| t.id == tid) {
-            team.finance = 60_000_000;
-            team.transfer_budget = 50_000_000;
-            team.wage_budget = 3_000_000;
-        }
-    }
     game
-}
-
-/// Backward-compatible default: manage the first team of the world.
-pub fn build_game(seed: u64) -> Game {
-    build_game_for_club(seed, &ClubPick::Index(0))
 }
 
 /// The agent's information set at the current date.
