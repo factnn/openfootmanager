@@ -280,9 +280,6 @@ impl Episode {
                     let _ = ofm_core::scouting::send_scout(&mut self.game, &scout_id, &player_id);
                 }
             }
-            Action::AcceptOffer { player_id, offer_id } => {
-                let _ = transfers::respond_to_offer(&mut self.game, &player_id, &offer_id, true);
-            }
         }
     }
 
