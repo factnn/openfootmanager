@@ -131,6 +131,10 @@ where
     F: FnMut(StatsState),
 {
     let today = game.clock.current_date.format("%Y-%m-%d").to_string();
+    // Day-keyed sub-stream: everything in this day (loans, training, injuries,
+    // news, AI activity) draws from a stream seeded only by (seed, date), so
+    // agent actions never shift tomorrow's randomness (ref_gpt §4).
+    crate::rng::set_domain("day", today.as_bytes());
     transfers::process_loan_development_reports(game);
     transfers::process_loan_returns(game);
 
@@ -142,6 +146,9 @@ where
         for competition_index in due_competitions {
             simulate_competition_day_with_capture(game, competition_index, &today, on_capture);
         }
+        // The match loop re-seeded per match; restore the day stream for the
+        // non-match processing that follows (dormant cups, national team).
+        crate::rng::set_domain("day", today.as_bytes());
     } else {
         let weekday_num = game.clock.current_date.weekday().num_days_from_monday();
         crate::ai_training::apply_ai_training_policies(game, weekday_num);
@@ -356,8 +363,8 @@ mod tests {
 /// builder so a manager's lineup decisions affect the simulated match.
 fn select_starting_xi_ids(game: &Game, team_id: &str, formation: &str) -> Vec<String> {
     use crate::player_rating::{effective_rating_for_assignment, formation_slots};
-    use std::collections::{HashMap, HashSet};
     use std::cmp::Ordering;
+    use std::collections::{HashMap, HashSet};
 
     let team = match game.teams.iter().find(|t| t.id == team_id) {
         Some(t) => t,
@@ -584,6 +591,11 @@ fn simulate_single_match_with_capture<F>(game: &mut Game, idx: usize, on_capture
 where
     F: FnMut(StatsState),
 {
+    // Match-keyed sub-stream: each fixture gets its own (seed, "match", idx)
+    // stream, so what the agent did in an earlier match — lineups, subs,
+    // scouting — never changes this match's underlying randomness (ref_gpt §4).
+    crate::rng::set_domain("match", &idx.to_le_bytes());
+
     let (home_team_id, away_team_id, is_knockout) = {
         let league = game.league.as_ref().unwrap();
         let f = &league.fixtures[idx];
