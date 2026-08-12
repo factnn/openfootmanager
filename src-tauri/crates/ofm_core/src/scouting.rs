@@ -745,6 +745,10 @@ fn build_scout_report(
     team_name: Option<&str>,
     date: &str,
 ) -> InboxMessage {
+    // Scout-keyed sub-stream: the report's fuzz draws from (seed, "scout",
+    // player, date), so scouting never shifts the world's other randomness
+    // (ref_gpt §4) and the same report is reproducible.
+    crate::rng::set_domain("scout", format!("{player_id}:{date}").as_bytes());
     let mut rng = crate::rng::rng();
 
     // Accuracy: higher judging = less noise on reported attributes
