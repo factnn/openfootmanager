@@ -126,9 +126,11 @@ pub fn check_random_events(game: &mut Game) {
                 .collect();
             if !eligible.is_empty() {
                 let player = eligible[rng.random_range(0..eligible.len())];
-                // Base 2% chance, scaled by fitness: less fit → higher probability
+                // Base ~4% chance, scaled by fitness: less fit → higher
+                // probability. Tuned so training-ground knocks add a handful of
+                // minor injuries per season on top of the match-day ones.
                 let fitness_mult = injury_probability_from_fitness(player.fitness);
-                let base_prob = 1.0_f64 / 50.0;
+                let base_prob = 1.0_f64 / 25.0;
                 let injury_prob = (base_prob * fitness_mult).min(1.0);
                 if rng.random_bool(injury_prob) {
                     let msg_id = format!("training_injury_{}_{}", player.id, today);
