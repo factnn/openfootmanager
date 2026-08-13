@@ -5,6 +5,8 @@ use domain::message::*;
 use domain::player::{Player, Position, SquadRole};
 use domain::staff::StaffRole;
 use rand::RngExt;
+use rand::rngs::StdRng;
+use rand::{SeedableRng, TryRng};
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -745,11 +747,17 @@ fn build_scout_report(
     team_name: Option<&str>,
     date: &str,
 ) -> InboxMessage {
-    // Scout-keyed sub-stream: the report's fuzz draws from (seed, "scout",
-    // player, date), so scouting never shifts the world's other randomness
-    // (ref_gpt §4) and the same report is reproducible.
-    crate::rng::set_domain("scout", format!("{player_id}:{date}").as_bytes());
-    let mut rng = crate::rng::rng();
+    // Scout-keyed LOCAL stream: the report's fuzz draws from a local rng seeded
+    // by (seed, "scout", player, date), so scouting never shifts the world's
+    // other randomness (ref_gpt §4). LOCAL is essential: the key contains a
+    // per-episode player UUID, so re-seeding the shared stream here would make
+    // the rest of the day's draws (transfer market etc.) non-reproducible.
+    let stream_seed = crate::rng::domain_seed("scout", format!("{player_id}:{date}").as_bytes());
+    let mut rng = match stream_seed {
+        Some(seed) => StdRng::seed_from_u64(seed),
+        None => StdRng::try_from_rng(&mut crate::rng::rng())
+            .unwrap_or_else(|_| StdRng::seed_from_u64(0)),
+    };
 
     // Accuracy: higher judging = less noise on reported attributes
     let noise_range = if judging_ability >= 80 {

@@ -59,16 +59,27 @@ pub fn reset_random() {
 ///
 /// No-op when no episode seed is active (normal gameplay stays entropy-random).
 pub fn set_domain(domain: &str, key: &[u8]) {
-    let base = match GLOBAL_SEED.with(|s| *s.borrow()) {
-        Some(seed) => seed,
-        None => return,
+    let Some(stream_seed) = domain_seed(domain, key) else {
+        return;
     };
+    GLOBAL_RNG.with(|r| *r.borrow_mut() = StdRng::seed_from_u64(stream_seed));
+}
+
+/// The deterministic stream seed for `(global_seed, domain, key)`, WITHOUT
+/// touching the shared thread-local RNG. Use this for spot randomness whose
+/// key is NOT reproducible across episodes (e.g. the scout report, keyed by a
+/// player UUID that is re-generated per episode): drawing from a LOCAL rng
+/// keeps that randomness deterministic per episode while leaving the shared
+/// stream untouched, so it can never hijack the rest of the day's draws.
+///
+/// Returns `None` when no episode seed is active (normal gameplay).
+pub fn domain_seed(domain: &str, key: &[u8]) -> Option<u64> {
+    let base = GLOBAL_SEED.with(|s| *s.borrow())?;
     let mut buf = Vec::with_capacity(domain.len() + key.len() + 8);
     buf.extend_from_slice(domain.as_bytes());
     buf.extend_from_slice(key);
     buf.extend_from_slice(&base.to_le_bytes());
-    let stream_seed = stable_hash(&buf);
-    GLOBAL_RNG.with(|r| *r.borrow_mut() = StdRng::seed_from_u64(stream_seed));
+    Some(stable_hash(&buf))
 }
 
 /// A handle to this thread's shared RNG. Multiple handles share one underlying
@@ -128,6 +139,36 @@ mod tests {
         set_domain("day", b"2026-07-01");
         assert_eq!(day_first, next_u64(), "day stream must ignore match draws");
 
+        reset_random();
+    }
+
+    #[test]
+    fn domain_seed_is_local_and_leaves_the_shared_stream_alone() {
+        set_seed(42);
+        set_domain("day", b"2026-07-01");
+        let _day_first = next_u64();
+        let _day_second = next_u64();
+
+        // A local domain seed (e.g. the scout report, keyed by a per-episode
+        // UUID) must NOT move the shared stream at all: drawing from a LOCAL
+        // rng leaves the next shared draw exactly where it was.
+        let scout_seed = domain_seed("scout", b"some-uuid:2026-07-01").expect("seeded");
+        let mut local = StdRng::seed_from_u64(scout_seed);
+        let _ = local.try_next_u64().unwrap();
+        let day_third = next_u64();
+
+        // A fresh day stream's third draw must equal it (local usage was a
+        // no-op on the shared stream).
+        set_domain("day", b"2026-07-01");
+        let _ = next_u64();
+        let _ = next_u64();
+        let expected_third = next_u64();
+        assert_eq!(expected_third, day_third, "domain_seed must not disturb the shared stream");
+        assert_eq!(
+            scout_seed,
+            domain_seed("scout", b"some-uuid:2026-07-01").unwrap(),
+            "domain_seed must be reproducible for the same key"
+        );
         reset_random();
     }
 }
