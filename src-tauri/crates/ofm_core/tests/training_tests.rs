@@ -1059,10 +1059,13 @@ fn ai_fatigue_guard_rests_exhausted_ai_player_but_not_user_team() {
         ai_after > 22,
         "AI exhausted player should recover under the fatigue guard, got {ai_after}"
     );
-    // Exempt: the user's identical player keeps net-losing condition at Medium.
+    // The user's identical player is exempt from the auto-rest guard, but with
+    // the tuned recovery curve they no longer spiral to zero at Medium
+    // intensity (recovery roughly offsets the cost) — exhaustion is now
+    // recoverable, not a death spiral.
     assert!(
-        user_after < 22,
-        "user-team exhausted player should not be auto-rested, got {user_after}"
+        user_after >= 22,
+        "user-team exhausted player should no longer net-lose condition at Medium, got {user_after}"
     );
     assert!(
         ai_after > user_after,

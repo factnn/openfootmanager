@@ -28,7 +28,10 @@ pub fn apply_match_wear(player: &mut Player, minutes: u8, rng: &mut impl Rng) {
 
     let minutes_factor = minutes as f64 / 90.0;
     let stamina_factor = player.attributes.stamina as f64 / 100.0;
-    let base_depletion = 40.0 * (1.0 - stamina_factor * 0.4);
+    // Tuned for realistic recovery: a full match costs ~18-22 condition, and
+    // the training loop recovers ~5-10/day — so a player is back to ~80%
+    // within 3 days and fully fit within a week (like real football).
+    let base_depletion = 30.0 * (1.0 - stamina_factor * 0.4);
     let depletion = (base_depletion * minutes_factor) as u8;
     player.condition = player.condition.saturating_sub(depletion);
 
@@ -62,14 +65,16 @@ pub fn roll_match_injury(player: &mut Player, rng: &mut impl Rng) -> bool {
     }
 
     // Base match-day risk, slightly higher than the training-ground rate to
-    // reflect competitive intensity.
-    let base_prob = 1.0_f64 / 40.0;
+    // reflect competitive intensity. Tuned for real-world rates: over a
+    // 38-match season a squad of ~11 starters picks up roughly 30-40 knocks,
+    // mostly minor (4-14 days).
+    let base_prob = 1.0_f64 / 12.0;
     let prob = (base_prob * injury_multiplier_from_fitness(player.fitness)).min(1.0);
     if !rng.random_bool(prob) {
         return false;
     }
 
-    let days = rng.random_range(5..=21);
+    let days = rng.random_range(4..=14);
     let name = MATCH_INJURY_NAMES[rng.random_range(0..MATCH_INJURY_NAMES.len())];
     player.injury = Some(Injury {
         name: name.to_string(),
@@ -123,13 +128,13 @@ mod tests {
 
     #[test]
     fn apply_match_wear_depletes_condition_by_minutes_and_stamina() {
-        let mut player = make_player(100); // stamina 100 -> base depletion 24 over 90'
+        let mut player = make_player(100); // stamina 100 -> base depletion 18 over 90'
         player.condition = 100;
         let mut rng = StdRng::seed_from_u64(1);
 
         apply_match_wear(&mut player, 90, &mut rng);
 
-        assert_eq!(player.condition, 76);
+        assert_eq!(player.condition, 82);
     }
 
     #[test]
@@ -180,7 +185,7 @@ mod tests {
                 assert!(player.injury.is_some());
                 let injury = player.injury.unwrap();
                 assert!(MATCH_INJURY_NAMES.contains(&injury.name.as_str()));
-                assert!((5..=21).contains(&injury.days_remaining));
+                assert!((4..=14).contains(&injury.days_remaining));
                 injured = true;
                 break;
             }

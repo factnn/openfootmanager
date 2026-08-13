@@ -224,13 +224,15 @@ fn train_player(
         }
     };
 
-    // Recovery amount: rest days get boosted recovery (like Recovery focus)
+    // Recovery amount: rest days get boosted recovery (like Recovery focus).
+    // Tuned so a post-match player recovers to ~80% within 3 days and to full
+    // fitness within a week (with the lowered match depletion in player_wear).
     let recovery_base: f64 = if !is_training_day {
-        7.0 * plan.bonus.physio_mult * plan.medical_facility_mult
+        12.0 * plan.bonus.physio_mult * plan.medical_facility_mult
     } else {
         match player_focus {
-            TrainingFocus::Recovery => 9.0 * plan.bonus.physio_mult * plan.medical_facility_mult,
-            _ => 3.0 * plan.bonus.physio_mult * plan.medical_facility_mult,
+            TrainingFocus::Recovery => 14.0 * plan.bonus.physio_mult * plan.medical_facility_mult,
+            _ => 8.0 * plan.bonus.physio_mult * plan.medical_facility_mult,
         }
     };
 
