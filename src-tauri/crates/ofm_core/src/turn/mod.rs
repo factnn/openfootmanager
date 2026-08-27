@@ -130,6 +130,43 @@ pub fn process_day_with_capture<F>(game: &mut Game, on_capture: &mut F)
 where
     F: FnMut(StatsState),
 {
+    process_day_core(game, None, on_capture);
+}
+
+/// Process the day but leave ONE fixture unplayed — the user's live match,
+/// which the ClubBench L1 stopped-match flow plays through the live-match
+/// engine instead (the same recipe the GUI's `advance_time_with_mode` uses:
+/// swap the competition in, play the other fixtures, mirror back). Everything
+/// else about the day is identical to `process_day`, so the with/without
+/// match-stops arms differ only in the user fixture's control.
+pub fn process_day_skipping_fixture(
+    game: &mut Game,
+    competition_index: usize,
+    fixture_index: usize,
+) {
+    process_day_skipping_fixture_with_capture(
+        game,
+        competition_index,
+        fixture_index,
+        &mut |_| {},
+    );
+}
+
+pub fn process_day_skipping_fixture_with_capture<F>(
+    game: &mut Game,
+    competition_index: usize,
+    fixture_index: usize,
+    on_capture: &mut F,
+) where
+    F: FnMut(StatsState),
+{
+    process_day_core(game, Some((competition_index, fixture_index)), on_capture);
+}
+
+fn process_day_core<F>(game: &mut Game, skip: Option<(usize, usize)>, on_capture: &mut F)
+where
+    F: FnMut(StatsState),
+{
     let today = game.clock.current_date.format("%Y-%m-%d").to_string();
     // Day-keyed sub-stream: everything in this day (loans, training, injuries,
     // news, AI activity) draws from a stream seeded only by (seed, date), so
@@ -144,7 +181,30 @@ where
     if has_match_today {
         info!("[turn] process_day {}: matchday", today);
         for competition_index in due_competitions {
-            simulate_competition_day_with_capture(game, competition_index, &today, on_capture);
+            match skip {
+                Some((skip_competition, skip_fixture)) if skip_competition == competition_index => {
+                    // Live-match recipe: swap the competition into the legacy
+                    // mirror, play every other fixture, mirror the result back.
+                    let competition = game.competitions[competition_index].clone();
+                    game.league = Some(competition);
+                    simulate_other_matches_with_capture(
+                        game,
+                        &today,
+                        Some(skip_fixture),
+                        on_capture,
+                    );
+                    if let Some(updated_competition) = game.league.take() {
+                        game.competitions[competition_index] = updated_competition;
+                    }
+                    game.sync_legacy_league();
+                }
+                _ => simulate_competition_day_with_capture(
+                    game,
+                    competition_index,
+                    &today,
+                    on_capture,
+                ),
+            }
         }
         // The match loop re-seeded per match; restore the day stream for the
         // non-match processing that follows (dormant cups, national team).
@@ -239,11 +299,13 @@ pub fn finish_live_match_day(game: &mut Game) {
     crate::season_context::refresh_game_context(game);
 }
 
-/// Apply a finished (or force-completed) live-match session to the game and
-/// run the rest of the matchday — the headless equivalent of the GUI's
-/// `finish_live_match` flow. Mirrors that flow exactly: run to completion,
-/// write the report into the session's competition, then `finish_live_match_day`.
-/// Returns the stats captures collected while applying the report.
+/// Apply a finished (or force-completed) live-match session to the game —
+/// the headless equivalent of the GUI's `finish_live_match` report writing.
+/// Runs the session to completion, writes the report into the session's
+/// competition, and mirrors it back. The matchday's remaining processing was
+/// already done by `process_day_skipping_fixture` when the day advanced, so
+/// nothing else runs here (no double clock advance). Returns the stats
+/// captures collected while applying the report.
 pub fn apply_finished_live_match(
     game: &mut Game,
     mut session: crate::live_match_manager::LiveMatchSession,
@@ -279,7 +341,7 @@ pub fn apply_finished_live_match(
     );
 
     // Mirror the session's competition back into `game.competitions`, then
-    // restore the legacy mirror before the rest of the day runs.
+    // restore the legacy mirror.
     if let Some(league) = game.league.clone() {
         if let Some(idx) = game.competitions.iter().position(|c| c.id == league.id) {
             game.competitions[idx] = league;
@@ -289,7 +351,6 @@ pub fn apply_finished_live_match(
         game.sync_legacy_league();
     }
 
-    finish_live_match_day(game);
     captures
 }
 
