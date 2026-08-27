@@ -155,6 +155,19 @@ impl LiveMatchSession {
         results
     }
 
+    /// Step until the match reaches `target_minute` (or ends earlier). This is
+    /// the headless ClubBench L1 driver: the caller pauses at checkpoints
+    /// (e.g. 30', half-time, 60', 75') to inspect `snapshot()` and inject
+    /// `apply_command` substitutions / tactic changes, then steps on. The AI
+    /// opponent makes its own decisions inside `step` as usual. Returns the
+    /// current minute.
+    pub fn step_to(&mut self, target_minute: u8) -> u8 {
+        while !self.match_state.is_finished() && self.match_state.minute() < target_minute {
+            self.step();
+        }
+        self.match_state.minute()
+    }
+
     pub fn snapshot(&self) -> MatchSnapshot {
         self.match_state.snapshot()
     }

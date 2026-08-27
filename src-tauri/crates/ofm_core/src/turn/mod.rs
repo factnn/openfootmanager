@@ -239,6 +239,60 @@ pub fn finish_live_match_day(game: &mut Game) {
     crate::season_context::refresh_game_context(game);
 }
 
+/// Apply a finished (or force-completed) live-match session to the game and
+/// run the rest of the matchday — the headless equivalent of the GUI's
+/// `finish_live_match` flow. Mirrors that flow exactly: run to completion,
+/// write the report into the session's competition, then `finish_live_match_day`.
+/// Returns the stats captures collected while applying the report.
+pub fn apply_finished_live_match(
+    game: &mut Game,
+    mut session: crate::live_match_manager::LiveMatchSession,
+) -> Vec<StatsState> {
+    if !session.is_finished() {
+        session.run_to_completion();
+    }
+
+    let fixture_index = session.fixture_index;
+    let competition_id = session.competition_id.clone();
+    let home_team_id = session.home_team_id.clone();
+    let away_team_id = session.away_team_id.clone();
+    let report = session.match_state.into_report();
+
+    // `fixture_index` indexes the fixtures of the session's competition
+    // (possibly a cup); `game.league` may hold the user's domestic league.
+    if let Some(idx) = game
+        .competitions
+        .iter()
+        .position(|c| c.id == competition_id)
+    {
+        game.league = Some(game.competitions[idx].clone());
+    }
+
+    let mut captures = Vec::new();
+    apply_match_report_with_capture(
+        game,
+        fixture_index,
+        &home_team_id,
+        &away_team_id,
+        &report,
+        &mut |capture| captures.push(capture),
+    );
+
+    // Mirror the session's competition back into `game.competitions`, then
+    // restore the legacy mirror before the rest of the day runs.
+    if let Some(league) = game.league.clone() {
+        if let Some(idx) = game.competitions.iter().position(|c| c.id == league.id) {
+            game.competitions[idx] = league;
+        }
+    }
+    if !game.competitions.is_empty() {
+        game.sync_legacy_league();
+    }
+
+    finish_live_match_day(game);
+    captures
+}
+
 #[cfg(test)]
 #[allow(clippy::items_after_test_module)]
 mod tests {

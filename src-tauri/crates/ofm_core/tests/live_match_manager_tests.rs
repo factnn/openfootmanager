@@ -706,3 +706,98 @@ fn extra_time_flag_passed_through() {
     let session = live_match_manager::create_live_match(&game, 0, MatchMode::Instant, true);
     assert!(session.is_ok());
 }
+
+// ---------------------------------------------------------------------------
+// Stopped-match driver (headless L1): checkpoint stepping, substitutions,
+// deterministic replay, and the game-application path.
+// ---------------------------------------------------------------------------
+
+/// Build a fully playable compact game the same way the scenario tests do.
+fn make_scenario_game(seed: u64) -> Game {
+    let world = ofm_core::generator::generate_world_data_seeded_with(
+        seed,
+        &ofm_core::generator::WorldGenConfig::compact(),
+        None,
+    );
+    let start = Utc.with_ymd_and_hms(2026, 7, 1, 0, 0, 0).unwrap();
+    let clock = GameClock::new(start);
+    let first_team = world.teams.first().expect("world must have a team");
+    let mut manager = Manager::new(
+        "scenario-mgr".to_string(),
+        "Scenario".to_string(),
+        "Manager".to_string(),
+        "1980-01-01".to_string(),
+        "England".to_string(),
+    );
+    manager.hire(first_team.id.clone());
+    let team_ids: Vec<String> = world.teams.iter().map(|t| t.id.clone()).collect();
+    let mut game = Game::new(clock, manager, world.teams, world.players, world.staff, vec![]);
+    game.available_staff_market_last_activity_date = Some(start.format("%Y-%m-%d").to_string());
+    ofm_core::generator::repair_opening_youth_academies(&mut game);
+    game.league = Some(ofm_core::schedule::generate_league(
+        "Scenario League",
+        2026,
+        &team_ids,
+        start,
+    ));
+    ofm_core::season_context::refresh_game_context(&mut game);
+    // The real environment registers the league as an explicit competition;
+    // sync_legacy_league relies on this to mirror updates back.
+    game.competitions = vec![game.league.clone().unwrap()];
+    game.active_competition_ids = game.competitions.iter().map(|c| c.id.clone()).collect();
+    game
+}
+
+#[test]
+fn stopped_match_driver_is_deterministic_and_lands_the_result() {
+    use engine::{MatchCommand, Side};
+
+    let run = |seed: u64| {
+        ofm_core::rng::set_seed(seed);
+        let mut game = make_scenario_game(seed);
+        let team_id = game.manager.team_id.clone().unwrap();
+        let idx = game
+            .league
+            .as_ref()
+            .unwrap()
+            .fixtures
+            .iter()
+            .position(|f| {
+                f.status == FixtureStatus::Scheduled
+                    && (f.home_team_id == team_id || f.away_team_id == team_id)
+            })
+            .expect("user team must have a scheduled fixture");
+        ofm_core::rng::set_domain("match", &idx.to_le_bytes());
+        let mut session =
+            live_match_manager::create_live_match(&game, idx, MatchMode::Live, false).unwrap();
+        let side = session.user_side.expect("user side must be known");
+        assert_eq!(session.step_to(30), 30);
+        let bench = session.match_state.bench(side).to_vec();
+        assert!(!bench.is_empty(), "a squad must provide bench options");
+        let starter_id = match side {
+            Side::Home => session.snapshot().home_team.players[0].id.clone(),
+            Side::Away => session.snapshot().away_team.players[0].id.clone(),
+        };
+        session
+            .apply_command(MatchCommand::Substitute {
+                side,
+                player_off_id: starter_id,
+                player_on_id: bench[0].id.clone(),
+            })
+            .expect("substitution must be accepted");
+        session.step_to(45);
+        session.step_to(75);
+        let _captures = ofm_core::turn::apply_finished_live_match(&mut game, session);
+        let league = game.league.as_ref().unwrap();
+        let fixture = &league.fixtures[idx];
+        assert_eq!(fixture.status, FixtureStatus::Completed);
+        let result = fixture.result.clone().expect("completed fixture has a result");
+        (result.home_goals, result.away_goals)
+    };
+
+    assert_eq!(
+        run(42),
+        run(42),
+        "same seed + same commands must replay bit-identically"
+    );
+}
