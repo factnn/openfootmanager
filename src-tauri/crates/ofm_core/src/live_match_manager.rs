@@ -156,7 +156,7 @@ impl LiveMatchSession {
     }
 
     /// Step until the match reaches `target_minute` (or ends earlier). This is
-    /// the headless ClubBench L1 driver: the caller pauses at checkpoints
+    /// the headless FromPitch2Board L1 driver: the caller pauses at checkpoints
     /// (e.g. 30', half-time, 60', 75') to inspect `snapshot()` and inject
     /// `apply_command` substitutions / tactic changes, then steps on. The AI
     /// opponent makes its own decisions inside `step` as usual. Returns the

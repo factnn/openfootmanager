@@ -134,7 +134,7 @@ where
 }
 
 /// Process the day but leave ONE fixture unplayed — the user's live match,
-/// which the ClubBench L1 stopped-match flow plays through the live-match
+/// which the FromPitch2Board L1 stopped-match flow plays through the live-match
 /// engine instead (the same recipe the GUI's `advance_time_with_mode` uses:
 /// swap the competition in, play the other fixtures, mirror back). Everything
 /// else about the day is identical to `process_day`, so the with/without

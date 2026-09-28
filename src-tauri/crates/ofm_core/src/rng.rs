@@ -1,7 +1,7 @@
 //! Deterministic, seedable per-thread RNG for reproducible benchmark episodes.
 //!
 //! Normal gameplay draws from OS entropy (random, as before). For a reproducible
-//! ClubBench episode, call [`set_seed`] once at the start of the episode; every
+//! FromPitch2Board episode, call [`set_seed`] once at the start of the episode; every
 //! later [`rng()`] call on the same thread then draws sequentially from a single
 //! seeded [`StdRng`], so the whole trajectory is reproducible for a given seed.
 //!
